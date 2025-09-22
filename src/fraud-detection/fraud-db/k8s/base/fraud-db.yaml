@@ -1,0 +1,122 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fraud-db-config
+  namespace: fraud-detection
+data:
+  POSTGRES_DB: "fraud_detection"
+  POSTGRES_USER: "fraud_user"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fraud-db-secret
+  namespace: fraud-detection
+type: Opaque
+data:
+  POSTGRES_PASSWORD: ZnJhdWRfcGFzcw==  # fraud_pass
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fraud-db-pvc
+  namespace: fraud-detection
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-db
+  namespace: fraud-detection
+  labels:
+    app: fraud-db
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-db
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: fraud-db
+        version: v1
+    spec:
+      containers:
+      - name: fraud-db
+        image: postgres:13
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: fraud-db-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: fraud-db-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: fraud-db-secret
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: fraud-db-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - fraud_user
+            - -d
+            - fraud_detection
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - fraud_user
+            - -d
+            - fraud_detection
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: fraud-db-storage
+        persistentVolumeClaim:
+          claimName: fraud-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-db
+  namespace: fraud-detection
+  labels:
+    app: fraud-db
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: fraud-db

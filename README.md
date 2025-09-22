@@ -1,11 +1,30 @@
-# Bank of Anthos
+# Bank of Anthos + AI Fraud Detection System
 
 <!-- Checks badge below seem to take a "neutral" check as a negative and shows failures if some checks are neutral. Commenting out the badge for now. -->
 <!-- ![GitHub branch check runs](https://img.shields.io/github/check-runs/GoogleCloudPlatform/bank-of-anthos/main) -->
-[![Website](https://img.shields.io/website?url=https%3A%2F%2Fcymbal-bank.fsi.cymbal.dev%2F&label=live%20demo
-)](https://cymbal-bank.fsi.cymbal.dev)
+
+[![Website](https://img.shields.io/website?url=https%3A%2F%2Fcymbal-bank.fsi.cymbal.dev%2F&label=live%20demo)](https://cymbal-bank.fsi.cymbal.dev)
 
 **Bank of Anthos** is a sample HTTP-based web app that simulates a bank's payment processing network, allowing users to create artificial bank accounts and complete transactions.
+
+## 🚨 NEW: AI-Powered Fraud Detection System
+
+This enhanced version includes an **intelligent fraud detection system** built for the **GKE Turns 10 Hackathon**, featuring:
+
+- **🤖 Google Agent Developer Kit (ADK)**: Advanced AI agent architecture with tool-based reasoning
+- **🧠 Gemini AI Integration**: Real-time fraud analysis with explainable AI decisions
+- **📊 Real-time Dashboard**: Live monitoring of transactions and fraud alerts
+- **🔍 External Monitoring**: Non-intrusive fraud detection without modifying core banking services
+- **⚡ Auto-scaling**: Production-ready deployment with HPA and resource management
+- **🎯 Demo Ready**: Comprehensive scenarios showcasing AI capabilities
+
+### Technology Stack
+
+- **AI/ML**: Google Gemini AI, Agent Developer Kit (ADK), Model Context Protocol (MCP)
+- **Backend**: FastAPI, PostgreSQL, SQLAlchemy
+- **Frontend**: Streamlit Dashboard
+- **Infrastructure**: Google Kubernetes Engine (GKE), Docker, Skaffold
+- **Monitoring**: Real-time transaction analysis, fraud scoring, alert system
 
 Google uses this application to demonstrate how developers can modernize enterprise applications using Google Cloud products, including: [Google Kubernetes Engine (GKE)](https://cloud.google.com/kubernetes-engine), [Anthos Service Mesh (ASM)](https://cloud.google.com/anthos/service-mesh), [Anthos Config Management (ACM)](https://cloud.google.com/anthos/config-management), [Migrate to Containers](https://cloud.google.com/migrate/containers), [Spring Cloud GCP](https://spring.io/projects/spring-cloud-gcp), [Cloud Operations](https://cloud.google.com/products/operations), [Cloud SQL](https://cloud.google.com/sql/docs), [Cloud Build](https://cloud.google.com/build), and [Cloud Deploy](https://cloud.google.com/deploy). This application works on any Kubernetes cluster.
 
@@ -15,26 +34,72 @@ If you are using Bank of Anthos, please ★Star this repository to show your int
 
 ## Screenshots
 
-| Sign in                                                                                                        | Home                                                                                                    |
-| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Sign in                                              | Home                                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [![Login](/docs/img/login.png)](/docs/img/login.png) | [![User Transactions](/docs/img/transactions.png)](/docs/img/transactions.png) |
-
 
 ## Service architecture
 
 ![Architecture Diagram](/docs/img/architecture.png)
 
-| Service                                                 | Language      | Description                                                                                                                                  |
-| ------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| [frontend](/src/frontend)                              | Python        | Exposes an HTTP server to serve the website. Contains login page, signup page, and home page.                                                |
-| [ledger-writer](/src/ledger/ledgerwriter)              | Java          | Accepts and validates incoming transactions before writing them to the ledger.                                                               |
-| [balance-reader](/src/ledger/balancereader)            | Java          | Provides efficient readable cache of user balances, as read from `ledger-db`.                                                                |
-| [transaction-history](/src/ledger/transactionhistory)  | Java          | Provides efficient readable cache of past transactions, as read from `ledger-db`.                                                            |
-| [ledger-db](/src/ledger/ledger-db)                     | PostgreSQL    | Ledger of all transactions. Option to pre-populate with transactions for demo users.                                                         |
-| [user-service](/src/accounts/userservice)              | Python        | Manages user accounts and authentication. Signs JWTs used for authentication by other services.                                              |
-| [contacts](/src/accounts/contacts)                     | Python        | Stores list of other accounts associated with a user. Used for drop down in "Send Payment" and "Deposit" forms.                              |
-| [accounts-db](/src/accounts/accounts-db)               | PostgreSQL    | Database for user accounts and associated data. Option to pre-populate with demo users.                                                      |
-| [loadgenerator](/src/loadgenerator)                    | Python/Locust | Continuously sends requests imitating users to the frontend. Periodically creates new accounts and simulates transactions between them.      |
+| Service                                               | Language      | Description                                                                                                                             |
+| ----------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| [frontend](/src/frontend)                             | Python        | Exposes an HTTP server to serve the website. Contains login page, signup page, and home page.                                           |
+| [ledger-writer](/src/ledger/ledgerwriter)             | Java          | Accepts and validates incoming transactions before writing them to the ledger.                                                          |
+| [balance-reader](/src/ledger/balancereader)           | Java          | Provides efficient readable cache of user balances, as read from `ledger-db`.                                                           |
+| [transaction-history](/src/ledger/transactionhistory) | Java          | Provides efficient readable cache of past transactions, as read from `ledger-db`.                                                       |
+| [ledger-db](/src/ledger/ledger-db)                    | PostgreSQL    | Ledger of all transactions. Option to pre-populate with transactions for demo users.                                                    |
+| [user-service](/src/accounts/userservice)             | Python        | Manages user accounts and authentication. Signs JWTs used for authentication by other services.                                         |
+| [contacts](/src/accounts/contacts)                    | Python        | Stores list of other accounts associated with a user. Used for drop down in "Send Payment" and "Deposit" forms.                         |
+| [accounts-db](/src/accounts/accounts-db)              | PostgreSQL    | Database for user accounts and associated data. Option to pre-populate with demo users.                                                 |
+| [loadgenerator](/src/loadgenerator)                   | Python/Locust | Continuously sends requests imitating users to the frontend. Periodically creates new accounts and simulates transactions between them. |
+
+## 🚨 Fraud Detection Services
+
+| Service                                                 | Language         | Description                                                                                                                                 |
+| ------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [fraud-api](/src/fraud-detection/fraud-api)             | Python/FastAPI   | **ADK-powered fraud detection engine**. Uses Google Agent Developer Kit with Gemini AI for real-time transaction analysis and risk scoring. |
+| [fraud-monitor](/src/fraud-detection/fraud-monitor)     | Python           | **Transaction monitor**. Continuously polls Bank of Anthos APIs for new transactions and sends them to fraud detection engine.              |
+| [fraud-dashboard](/src/fraud-detection/fraud-dashboard) | Python/Streamlit | **Real-time fraud dashboard**. Interactive web interface showing live fraud alerts, risk scores, and transaction analysis.                  |
+| [fraud-db](/src/fraud-detection/fraud-db)               | PostgreSQL       | **Fraud detection database**. Stores fraud analysis results, risk scores, and historical fraud patterns for ML training.                    |
+
+## 🚀 Quick Start - Fraud Detection System
+
+### Prerequisites
+
+- Google Cloud project with billing enabled
+- `kubectl`, `skaffold`, and `docker` installed
+- Gemini API key (get one at [Google AI Studio](https://makersuite.google.com/app/apikey))
+
+### Deploy Complete System (Bank of Anthos + Fraud Detection)
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/GoogleCloudPlatform/bank-of-anthos.git
+cd bank-of-anthos
+
+# 2. Set your Gemini API key
+export GEMINI_API_KEY="your-gemini-api-key-here"
+
+# 3. Apply JWT secret
+kubectl apply -f ./extras/jwt/jwt-secret.yaml
+
+# 4. Deploy everything (includes fraud detection)
+skaffold dev --profile=development --port-forward --platform=linux/amd64
+```
+
+### Access Your Services
+
+- **🏦 Bank of Anthos**: http://localhost:8080
+- **🚨 Fraud Dashboard**: http://localhost:8501
+- **🔧 Fraud API**: http://localhost:8000
+- **📚 API Documentation**: http://localhost:8000/docs
+
+### Demo Scenarios
+
+1. **Normal Transaction**: Small coffee purchase → Low risk score (0.1-0.3)
+2. **Suspicious Transaction**: Large amount at unusual time/location → High risk score (0.7-0.9)
+3. **Fraud Pattern**: Multiple rapid transactions → Critical risk score (0.9+)
 
 ## Interactive quickstart (GKE)
 
@@ -45,6 +110,7 @@ The following button opens up an interactive tutorial showing how to deploy Bank
 ## Quickstart (GKE)
 
 1. Ensure you have the following requirements:
+
    - [Google Cloud project](https://cloud.google.com/resource-manager/docs/creating-managing-projects#creating_a_project).
    - Shell environment with `gcloud`, `git`, and `kubectl`.
 
@@ -140,6 +206,7 @@ The following button opens up an interactive tutorial showing how to deploy Bank
 - [Troubleshooting](/docs/troubleshooting.md) to learn how to resolve common problems.
 
 ## Demos featuring Bank of Anthos
+
 - [Tutorial: Explore Anthos (Google Cloud docs)](https://cloud.google.com/anthos/docs/tutorials/explore-anthos)
 - [Tutorial: Migrating a monolith VM to GKE](https://cloud.google.com/migrate/containers/docs/migrating-monolith-vm-overview-setup)
 - [Tutorial: Running distributed services on GKE private clusters using ASM](https://cloud.google.com/service-mesh/docs/distributed-services-private-clusters)

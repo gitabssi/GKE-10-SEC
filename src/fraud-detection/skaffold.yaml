@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,31 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 apiVersion: skaffold/v4beta1
 kind: Config
 metadata:
-  name: bank-of-anthos
+  name: fraud-detection
 requires:
   - configs:
-      - accounts
-    path: src/accounts/skaffold.yaml
+      - fraud-api
+    path: fraud-api/skaffold.yaml
   - configs:
-      - ledger
-    path: src/ledger/skaffold.yaml
+      - fraud-monitor
+    path: fraud-monitor/skaffold.yaml
   - configs:
-      - frontend
-    path: src/frontend/skaffold.yaml
+      - fraud-dashboard
+    path: fraud-dashboard/skaffold.yaml
   - configs:
-      - loadgenerator
-    path: src/loadgenerator/skaffold.yaml
-  - configs:
-      - accounts-db
-    path: src/accounts/accounts-db/skaffold.yaml
-  - configs:
-      - ledger-db
-    path: src/ledger/ledger-db/skaffold.yaml
-  - configs:
-      - fraud-detection
-    path: src/fraud-detection/skaffold.yaml
+      - fraud-db
+    path: fraud-db/skaffold.yaml
 deploy:
   tolerateFailuresUntilDeadline: true

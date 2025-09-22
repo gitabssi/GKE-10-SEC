@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitor-config
+  namespace: fraud-detection
+data:
+  DATABASE_URL: "postgresql://fraud_user:fraud_pass@fraud-db:5432/fraud_detection"
+  BANK_API_BASE: "http://frontend.default.svc.cluster.local:8080"
+  FRAUD_API_BASE: "http://fraud-api:8000"
+  DEMO_USERNAME: "testuser"
+  DEMO_PASSWORD: "bankofanthos"
+  POLLING_INTERVAL: "5"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-monitor
+  namespace: fraud-detection
+  labels:
+    app: transaction-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transaction-monitor
+  template:
+    metadata:
+      labels:
+        app: transaction-monitor
+    spec:
+      containers:
+      - name: transaction-monitor
+        image: transaction-monitor:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: DATABASE_URL
+        - name: BANK_API_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: BANK_API_BASE
+        - name: FRAUD_API_BASE
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: FRAUD_API_BASE
+        - name: DEMO_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: DEMO_USERNAME
+        - name: DEMO_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: DEMO_PASSWORD
+        - name: POLLING_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: POLLING_INTERVAL
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
