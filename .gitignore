@@ -133,6 +133,14 @@ ENV/
 env.bak/
 venv.bak/
 
+# API Keys and Secrets (Security)
+**/GEMINI_API_KEY*
+**/gemini-api-key*
+**/*gemini*key*
+**/api-keys.txt
+**/secrets.yaml
+**/secrets.json
+
 # Spyder project settings
 .spyderproject
 .spyproject

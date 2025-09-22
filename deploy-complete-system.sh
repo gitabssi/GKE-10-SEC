@@ -34,7 +34,7 @@ print_error() {
 }
 
 # Configuration
-GEMINI_API_KEY="${GEMINI_API_KEY:-GEMINI_KEY}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4}"
 
 check_prerequisites() {
     print_status "Checking prerequisites..."

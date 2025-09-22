@@ -36,7 +36,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Gemini AI setup
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "GEMINI_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4")
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Verify API key is configured
