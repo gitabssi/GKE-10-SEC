@@ -34,9 +34,9 @@ If you are using Bank of Anthos, please ★Star this repository to show your int
 
 ## Screenshots
 
-| Sign in                                              | Home                                                                           |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [![Login](/docs/img/login.png)](/docs/img/login.png) | [![User Transactions](/docs/img/transactions.png)](/docs/img/transactions.png) |
+| Sign in                                                                              | Home                                                                           |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| [![Fraud Dashboard](/docs/img/fraude-dashboard.png)](/docs/img/fraude-dashboard.png) | [![User Transactions](/docs/img/transactions.png)](/docs/img/transactions.png) |
 
 ## Service architecture
 
