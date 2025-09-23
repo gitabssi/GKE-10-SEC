@@ -20,7 +20,7 @@ spec:
             - containerPort: 8000
           env:
             - name: GEMINI_API_KEY
-              value: "AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4"
+              value: "GEMINI _KEY"
             - name: BANK_OF_ANTHOS_FRONTEND_URL
               value: "http://frontend.default.svc.cluster.local"
             - name: LEDGERWRITER_URL

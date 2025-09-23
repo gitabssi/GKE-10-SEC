@@ -21,7 +21,7 @@ spec:
             - containerPort: 8000
           env:
             - name: GEMINI_API_KEY
-              value: "AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4"
+              value: "GEMINI _KEY"
           command: ["/bin/bash", "-c"]
           args:
             - |
