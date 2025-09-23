@@ -1,0 +1,337 @@
+# Fixed Bank of Anthos Fraud Detection Dashboard
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-dashboard-fixed
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-dashboard-fixed
+  template:
+    metadata:
+      labels:
+        app: fraud-dashboard-fixed
+    spec:
+      containers:
+        - name: fraud-dashboard
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8501
+          env:
+            - name: FRAUD_API_URL
+              value: "http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000"
+            - name: BANK_OF_ANTHOS_URL
+              value: "http://YOUR_BANK_OF_ANTHOS_URL"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install streamlit requests plotly pandas
+              mkdir -p /app && cd /app
+
+              # Create the Streamlit app file
+              cat > dashboard.py << 'EOF'
+              import streamlit as st
+              import requests
+              import json
+              import time
+              from datetime import datetime
+              import plotly.graph_objects as go
+              import os
+
+              st.set_page_config(
+                  page_title='Bank of Anthos - AI Fraud Detection',
+                  page_icon='🏦',
+                  layout='wide'
+              )
+
+              # Auto-refresh functionality
+              if 'auto_refresh' not in st.session_state:
+                  st.session_state.auto_refresh = True
+
+              # Add auto-refresh toggle in sidebar
+              with st.sidebar:
+                  st.markdown('### ⚙️ Dashboard Settings')
+                  auto_refresh = st.checkbox('🔄 Auto-refresh (10s)', value=st.session_state.auto_refresh, key='refresh_toggle')
+                  st.session_state.auto_refresh = auto_refresh
+
+                  if auto_refresh:
+                      st.info('🔄 Dashboard will refresh every 10 seconds')
+                      # Auto-refresh every 10 seconds
+                      time.sleep(10)
+                      st.rerun()
+                  else:
+                      refresh_btn = st.button('🔄 Refresh Now', type='secondary')
+                      if refresh_btn:
+                          st.rerun()
+
+              # Custom CSS for Bank of Anthos styling
+              st.markdown('''
+              <style>
+              .main > div {
+                  padding-top: 2rem;
+              }
+              .stButton > button {
+                  background-color: #008A20;
+                  color: white;
+                  border: none;
+                  border-radius: 4px;
+                  padding: 0.5rem 1rem;
+              }
+              .stButton > button:hover {
+                  background-color: #006b1a;
+              }
+              .metric-card {
+                  background: white;
+                  padding: 1rem;
+                  border-radius: 8px;
+                  border: 1px solid #e0e0e0;
+                  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              }
+              .risk-low { color: #28a745; font-weight: bold; }
+              .risk-medium { color: #ffc107; font-weight: bold; }
+              .risk-high { color: #dc3545; font-weight: bold; }
+              </style>
+              ''', unsafe_allow_html=True)
+
+              FRAUD_API_URL = os.getenv('FRAUD_API_URL', 'http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000')
+              BANK_OF_ANTHOS_URL = os.getenv('BANK_OF_ANTHOS_URL', 'http://YOUR_BANK_OF_ANTHOS_URL')
+
+              # Header
+              col1, col2, col3 = st.columns([1, 2, 1])
+              with col1:
+                  # Real-time status indicator
+                  current_time = datetime.now().strftime('%H:%M:%S')
+                  if st.session_state.auto_refresh:
+                      st.success(f'🟢 Live • {current_time}')
+                  else:
+                      st.info(f'⏸️ Paused • {current_time}')
+              with col2:
+                  st.markdown('# 🏦 Bank of Anthos')
+                  st.markdown('## AI Fraud Detection System')
+                  st.markdown('**Real-time transaction monitoring with Google Gemini AI**')
+              with col3:
+                  if st.button('🔙 Back to Bank of Anthos'):
+                      st.markdown(f'[Open Bank of Anthos]({BANK_OF_ANTHOS_URL})')
+
+              # System Status
+              try:
+                  health_response = requests.get(f'{FRAUD_API_URL}/health', timeout=5)
+                  system_status = health_response.json() if health_response.status_code == 200 else {}
+                  
+                  transactions_response = requests.get(f'{FRAUD_API_URL}/transactions', timeout=5)
+                  transactions_data = transactions_response.json() if transactions_response.status_code == 200 else {}
+                  
+                  alerts_response = requests.get(f'{FRAUD_API_URL}/fraud-alerts', timeout=5)
+                  alerts_data = alerts_response.json() if alerts_response.status_code == 200 else {}
+                  
+                  col1, col2, col3 = st.columns(3)
+                  
+                  with col1:
+                      st.metric('Transactions Monitored', system_status.get('transactions_processed', 0))
+                  
+                  with col2:
+                      st.metric('High Risk Alerts', alerts_data.get('high_risk_alerts', 0))
+                  
+                  with col3:
+                      if system_status.get('gemini_configured'):
+                          st.success('✅ Gemini AI Active')
+                      else:
+                          st.warning('⚠️ Fallback Mode')
+                  
+              except Exception as e:
+                  st.error(f'Connection error: {str(e)}')
+                  system_status = {}
+                  transactions_data = {}
+                  alerts_data = {}
+
+              # Test Transaction Section
+              st.markdown('---')
+              st.subheader('🧪 Test Bank Transaction')
+
+              col1, col2 = st.columns(2)
+
+              with col1:
+                  from_account = st.text_input('From Account', '1234567890', max_chars=10)
+                  amount = st.number_input('Amount ($)', min_value=0.01, value=100.0, step=0.01)
+
+              with col2:
+                  to_account = st.text_input('To Account', '0987654321', max_chars=10)
+                  routing = st.text_input('Routing Number', '123456789', max_chars=9)
+
+              if st.button('🔍 Analyze Transaction', type='primary'):
+                  with st.spinner('🤖 Analyzing with Google Gemini AI...'):
+                      try:
+                          bank_transaction = {
+                              'fromAccountNum': from_account,
+                              'fromRoutingNum': routing,
+                              'toAccountNum': to_account,
+                              'toRoutingNum': routing,
+                              'amount': int(float(amount) * 100),
+                              'uuid': f'test_{int(datetime.utcnow().timestamp())}'
+                          }
+                          
+                          response = requests.post(f'{FRAUD_API_URL}/analyze-bank-transaction', 
+                                                 json=bank_transaction, timeout=30)
+                          
+                          if response.status_code == 200:
+                              result = response.json()
+                              
+                              col1, col2, col3 = st.columns(3)
+                              
+                              with col1:
+                                  st.metric('Fraud Score', f'{result["fraud_score"]:.3f}')
+                              
+                              with col2:
+                                  risk_level = result['risk_level']
+                                  if risk_level == 'LOW':
+                                      st.success(f'✅ {risk_level} RISK')
+                                  elif risk_level == 'MEDIUM':
+                                      st.warning(f'⚠️ {risk_level} RISK')
+                                  else:
+                                      st.error(f'🚨 {risk_level} RISK')
+                              
+                              with col3:
+                                  st.metric('Confidence', f'{result["confidence"]:.3f}')
+                              
+                              # Risk gauge
+                              fig = go.Figure(go.Indicator(
+                                  mode = 'gauge+number',
+                                  value = result['fraud_score'] * 100,
+                                  title = {'text': 'Fraud Risk %'},
+                                  gauge = {
+                                      'axis': {'range': [None, 100]},
+                                      'bar': {'color': '#008A20'},
+                                      'steps': [
+                                          {'range': [0, 30], 'color': 'lightgreen'},
+                                          {'range': [30, 70], 'color': 'yellow'},
+                                          {'range': [70, 100], 'color': 'red'}
+                                      ]
+                                  }
+                              ))
+                              st.plotly_chart(fig, use_container_width=True)
+                              
+                              st.subheader('🔍 Analysis Results')
+                              st.write(result['explanation'])
+                              
+                              st.subheader('💡 Recommendation')
+                              if result['recommendation'] == 'APPROVE':
+                                  st.success(f'✅ {result["recommendation"]}: Transaction approved')
+                              elif result['recommendation'] == 'REVIEW':
+                                  st.warning(f'⚠️ {result["recommendation"]}: Manual review required')
+                              else:
+                                  st.error(f'🚫 {result["recommendation"]}: Transaction blocked')
+                              
+                              ai_mode = '🤖 Gemini AI' if result.get('ai_powered') else '🔧 Fallback'
+                              st.info(f'Analysis: {ai_mode} | Processing time: {result["processing_time_ms"]:.1f}ms')
+                              
+                          else:
+                              st.error(f'API Error: {response.status_code} - {response.text}')
+                              
+                      except Exception as e:
+                          st.error(f'Connection error: {str(e)}')
+
+              # Recent Transactions with Filtering
+              if transactions_data.get('transactions'):
+                  st.markdown('---')
+                  st.subheader('📊 Recent Bank of Anthos Transactions')
+
+                  # Add filtering controls
+                  col1, col2, col3 = st.columns(3)
+                  with col1:
+                      filter_from_account = st.text_input('🔍 Filter by From Account', placeholder='e.g., 1234567890', key='filter_from')
+                  with col2:
+                      filter_to_account = st.text_input('🔍 Filter by To Account', placeholder='e.g., 0987654321', key='filter_to')
+                  with col3:
+                      show_count = st.selectbox('Show transactions', [5, 10, 20, 50], index=0, key='show_count')
+
+                  # Apply filters
+                  all_transactions = transactions_data['transactions']
+                  filtered_transactions = all_transactions
+
+                  if filter_from_account:
+                      filtered_transactions = [t for t in filtered_transactions if filter_from_account in t.get('from_account', '')]
+
+                  if filter_to_account:
+                      filtered_transactions = [t for t in filtered_transactions if filter_to_account in t.get('to_account', '')]
+
+                  # Show results
+                  if filtered_transactions:
+                      st.info(f'📊 Showing {min(show_count, len(filtered_transactions))} of {len(filtered_transactions)} matching transactions (Total: {len(all_transactions)})')
+
+                      # Display transactions
+                      transactions_to_show = filtered_transactions[-show_count:]
+
+                      for transaction in reversed(transactions_to_show):
+                          with st.container():
+                              col1, col2, col3 = st.columns([2, 2, 1])
+                              with col1:
+                                  st.write(f'**${transaction["amount"]:.2f}**')
+                                  st.caption(f'From: {transaction["from_account"]}')
+                              with col2:
+                                  st.write(f'To: {transaction["to_account"]}')
+                                  st.caption(transaction['timestamp'])
+                              with col3:
+                                  st.success('✅ Monitored')
+                              st.divider()
+                  else:
+                      st.warning('🔍 No transactions match the current filters')
+                      st.info(f'📊 Total transactions in system: {len(all_transactions)}')
+
+              # Recent Alerts
+              if alerts_data.get('alerts'):
+                  st.markdown('---')
+                  st.subheader('🚨 Recent Fraud Analysis Results')
+                  
+                  for alert in alerts_data['alerts'][-3:]:
+                      with st.container():
+                          col1, col2 = st.columns([3, 1])
+                          with col1:
+                              st.write(f'**Transaction {alert["transactionId"]}**')
+                              risk_level = alert['risk_level']
+                              if risk_level == 'LOW':
+                                  st.success(f'{risk_level} RISK - Score: {alert["fraud_score"]:.3f}')
+                              elif risk_level == 'MEDIUM':
+                                  st.warning(f'{risk_level} RISK - Score: {alert["fraud_score"]:.3f}')
+                              else:
+                                  st.error(f'{risk_level} RISK - Score: {alert["fraud_score"]:.3f}')
+                              st.caption(alert['explanation'][:100] + '...')
+                          with col2:
+                              if alert['recommendation'] == 'APPROVE':
+                                  st.success(alert['recommendation'])
+                              elif alert['recommendation'] == 'REVIEW':
+                                  st.warning(alert['recommendation'])
+                              else:
+                                  st.error(alert['recommendation'])
+                              ai_mode = '🤖 AI' if alert.get('ai_powered') else '🔧 Fallback'
+                              st.caption(ai_mode)
+
+              # Footer
+              st.markdown('---')
+              st.markdown('**GKE Turns 10 Hackathon** | AI-Powered Fraud Detection | Google Cloud + Gemini AI | Integrated with Bank of Anthos')
+              EOF
+
+              # Start Streamlit
+              streamlit run dashboard.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-dashboard-fixed
+  namespace: fraud-detection
+spec:
+  type: LoadBalancer
+  selector:
+    app: fraud-dashboard-fixed
+  ports:
+    - name: http
+      port: 8501
+      targetPort: 8501

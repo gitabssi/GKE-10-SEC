@@ -23,7 +23,7 @@ metadata:
   name: fraud-api-config
   namespace: fraud-detection
 data:
-  DATABASE_URL: "postgresql://fraud_user:fraud_pass@fraud-db:5432/fraud_detection"
+  DATABASE_URL: "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@fraud-db:5432/fraud_detection"
   BANK_OF_ANTHOS_API_URL: "http://frontend.default.svc.cluster.local:80"
   LOG_LEVEL: "INFO"
 ---
@@ -34,7 +34,7 @@ metadata:
   namespace: fraud-detection
 type: Opaque
 data:
-  GEMINI_API_KEY: QUl6YVN5QjV0WlZ3WmVISlg2R3dSRTdkdVhRUm8wSUtXalhKZG00
+  GEMINI_API_KEY: YOUR_GEMINI_API_KEY_BASE64
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,77 +58,77 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
       containers:
-      - name: fraud-api
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - all
-          privileged: false
-          readOnlyRootFilesystem: true
-        image: fraud-api
-        ports:
-        - name: http-server
-          containerPort: 8000
-        env:
-        - name: VERSION
-          value: "dev"
-        - name: PORT
-          value: "8000"
-        - name: DATABASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: fraud-api-config
-              key: DATABASE_URL
-        - name: BANK_OF_ANTHOS_API_URL
-          valueFrom:
-            configMapKeyRef:
-              name: fraud-api-config
-              key: BANK_OF_ANTHOS_API_URL
-        - name: GEMINI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: fraud-api-secrets
-              key: GEMINI_API_KEY
-        - name: LOG_LEVEL
-          valueFrom:
-            configMapKeyRef:
-              name: fraud-api-config
-              key: LOG_LEVEL
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: publickey
-          mountPath: /tmp/.ssh
-          readOnly: true
+        - name: fraud-api
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - all
+            privileged: false
+            readOnlyRootFilesystem: true
+          image: fraud-api
+          ports:
+            - name: http-server
+              containerPort: 8000
+          env:
+            - name: VERSION
+              value: "dev"
+            - name: PORT
+              value: "8000"
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: fraud-api-config
+                  key: DATABASE_URL
+            - name: BANK_OF_ANTHOS_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: fraud-api-config
+                  key: BANK_OF_ANTHOS_API_URL
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: fraud-api-secrets
+                  key: GEMINI_API_KEY
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: fraud-api-config
+                  key: LOG_LEVEL
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: publickey
+              mountPath: /tmp/.ssh
+              readOnly: true
       volumes:
-      - name: tmp
-        emptyDir: {}
-      - name: publickey
-        secret:
-          secretName: jwt-key
-          items:
-          - key: jwtRS256.key.pub
-            path: publickey
+        - name: tmp
+          emptyDir: {}
+        - name: publickey
+          secret:
+            secretName: jwt-key
+            items:
+              - key: jwtRS256.key.pub
+                path: publickey
 ---
 apiVersion: v1
 kind: Service
@@ -138,8 +138,8 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-  - name: http
-    port: 8000
-    targetPort: 8000
+    - name: http
+      port: 8000
+      targetPort: 8000
   selector:
     app: fraud-api

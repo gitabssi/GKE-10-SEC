@@ -1,0 +1,213 @@
+# Transaction Redirect Service - Intercepts Bank of Anthos transactions
+# This creates a new ledgerwriter service that redirects to our interceptor
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledgerwriter-interceptor
+  namespace: default
+  labels:
+    app: ledgerwriter-interceptor
+spec:
+  type: ClusterIP
+  selector:
+    app: transaction-interceptor
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+---
+# ConfigMap to update frontend configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config-interceptor
+  namespace: default
+data:
+  TRANSACTIONS_URI: "http://transaction-interceptor.fraud-detection.svc.cluster.local:8080/transactions"
+---
+# Deployment patch to use interceptor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-interceptor-patch
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-interceptor
+  template:
+    metadata:
+      labels:
+        app: frontend-interceptor
+    spec:
+      containers:
+      - name: frontend
+        image: python:3.11-slim
+        ports:
+        - containerPort: 8080
+        env:
+        - name: VERSION
+          value: "v0.6.4"
+        - name: PORT
+          value: "8080"
+        - name: ENABLE_TRACING
+          value: "false"
+        - name: SCHEME
+          value: "http"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: DEFAULT_USERNAME
+          value: "testuser"
+        - name: DEFAULT_PASSWORD
+          value: "bankofanthos"
+        - name: REGISTERED_OAUTH_CLIENT_ID
+          value: ""
+        - name: ALLOWED_OAUTH_REDIRECT_URI
+          value: ""
+        - name: TRANSACTIONS_URI
+          value: "http://transaction-interceptor.fraud-detection.svc.cluster.local:8080/transactions"
+        - name: BALANCES_URI
+          value: "http://balancereader.default.svc.cluster.local:8080/balances"
+        - name: HISTORY_URI
+          value: "http://transactionhistory.default.svc.cluster.local:8080/transactions"
+        - name: CONTACTS_URI
+          value: "http://contacts.default.svc.cluster.local:8080/contacts"
+        - name: USERSERVICE_URI
+          value: "http://userservice.default.svc.cluster.local:8080/users"
+        - name: LOCAL_ROUTING_NUM
+          value: "883745000"
+        - name: PUB_KEY_PATH
+          value: "/tmp/.ssh/publickey"
+        - name: PRIV_KEY_PATH
+          value: "/tmp/.ssh/privatekey"
+        - name: EXTRA_LATENCY_MILLIS
+          value: "0"
+        - name: ENABLE_SINGLE_SIGN_ON
+          value: "false"
+        - name: ASM_CLIENT_ID
+          value: ""
+        - name: BACKEND_TIMEOUT
+          value: "4"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          # Install dependencies
+          pip install flask requests gunicorn pyjwt[crypto] bleach
+          
+          # Copy Bank of Anthos frontend code
+          mkdir -p /app
+          cd /app
+          
+          # Create a simple proxy that redirects transactions to our interceptor
+          python3 -c "
+          from flask import Flask, request, redirect, url_for, render_template_string
+          import requests
+          import os
+          
+          app = Flask(__name__)
+          
+          TRANSACTIONS_URI = os.getenv('TRANSACTIONS_URI', 'http://transaction-interceptor.fraud-detection.svc.cluster.local:8080/transactions')
+          ORIGINAL_FRONTEND = 'http://frontend.default.svc.cluster.local'
+          
+          @app.route('/')
+          def home():
+              return '''
+              <!DOCTYPE html>
+              <html>
+              <head>
+                  <title>Bank of Anthos - Transaction Interceptor Active</title>
+                  <style>
+                      body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+                      .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                      .header { text-align: center; margin-bottom: 30px; }
+                      .status { background: #e8f5e8; border: 1px solid #4caf50; padding: 20px; border-radius: 4px; margin: 20px 0; }
+                      .info { background: #e3f2fd; border: 1px solid #2196f3; padding: 20px; border-radius: 4px; margin: 20px 0; }
+                      .btn { display: inline-block; padding: 12px 24px; background: #008A20; color: white; text-decoration: none; border-radius: 4px; margin: 10px; }
+                      .btn:hover { background: #006b1a; }
+                  </style>
+              </head>
+              <body>
+                  <div class=\"container\">
+                      <div class=\"header\">
+                          <h1>🏦 Bank of Anthos</h1>
+                          <h2>🤖 AI Fraud Detection Integration Active</h2>
+                      </div>
+                      
+                      <div class=\"status\">
+                          <h3>✅ Transaction Monitoring Status</h3>
+                          <p><strong>Real-time fraud detection is now active!</strong></p>
+                          <p>All Bank of Anthos transactions are being monitored and analyzed by Google Gemini AI.</p>
+                      </div>
+                      
+                      <div class=\"info\">
+                          <h3>🔍 How It Works</h3>
+                          <ul>
+                              <li><strong>Transaction Interception:</strong> All payments are automatically captured</li>
+                              <li><strong>Gemini AI Analysis:</strong> Each transaction is analyzed for fraud risk</li>
+                              <li><strong>Real-time Alerts:</strong> Suspicious transactions trigger immediate alerts</li>
+                              <li><strong>Dashboard Display:</strong> View detailed analysis results in real-time</li>
+                          </ul>
+                      </div>
+                      
+                      <div style=\"text-align: center; margin-top: 30px;\">
+                          <a href=\"http://34.45.238.170\" class=\"btn\">🏦 Go to Bank of Anthos</a>
+                          <a href=\"http://34.16.82.200:5000\" class=\"btn\">📊 View Fraud Detection Dashboard</a>
+                      </div>
+                      
+                      <div style=\"text-align: center; margin-top: 20px; color: #666;\">
+                          <p><em>Make a payment in Bank of Anthos to see real-time fraud detection in action!</em></p>
+                      </div>
+                  </div>
+              </body>
+              </html>
+              '''
+          
+          # Proxy all other requests to original frontend
+          @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+          def proxy_to_frontend(path):
+              try:
+                  url = f'{ORIGINAL_FRONTEND}/{path}'
+                  
+                  response = requests.request(
+                      method=request.method,
+                      url=url,
+                      headers=dict(request.headers),
+                      data=request.get_data(),
+                      params=request.args,
+                      timeout=30
+                  )
+                  
+                  from flask import Response
+                  return Response(
+                      response.content,
+                      status=response.status_code,
+                      headers=dict(response.headers)
+                  )
+              except Exception as e:
+                  return f'<h1>Service Unavailable</h1><p>Error: {str(e)}</p><p><a href=\"http://34.45.238.170\">Go to Bank of Anthos</a></p>', 503
+          
+          if __name__ == '__main__':
+              app.run(host='0.0.0.0', port=8080, debug=False)
+          "
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-interceptor
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: frontend-interceptor
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080

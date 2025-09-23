@@ -30,17 +30,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Database setup
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://fraud_user:fraud_pass@fraud-db:5432/fraud_detection")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://YOUR_DB_USER:YOUR_DB_PASSWORD@YOUR_DB_HOST:5432/fraud_detection")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Gemini AI setup
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Verify API key is configured
-if GEMINI_API_KEY == "your-gemini-api-key":
+if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
     logger.warning("Using placeholder Gemini API key - please set GEMINI_API_KEY environment variable")
 else:
     logger.info("Gemini API configured successfully")

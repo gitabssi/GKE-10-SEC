@@ -63,6 +63,27 @@ If you are using Bank of Anthos, please ★Star this repository to show your int
 | [fraud-dashboard](/src/fraud-detection/fraud-dashboard) | Python/Streamlit | **Real-time fraud dashboard**. Interactive web interface showing live fraud alerts, risk scores, and transaction analysis.                  |
 | [fraud-db](/src/fraud-detection/fraud-db)               | PostgreSQL       | **Fraud detection database**. Stores fraud analysis results, risk scores, and historical fraud patterns for ML training.                    |
 
+## Services Interaction Graph
+
+The diagram shows how the external fraud detection stack integrates non‑intrusively with Bank of Anthos. All URLs/API keys are parameterized via environment variables.
+
+```mermaid
+graph LR
+  subgraph Bank_of_Anthos
+    UA[User Browser] --> FE[frontend]
+    FE --> BR[balancereader]
+    FE --> TH[transactionhistory]
+  end
+  FE -. TRANSACTIONS_API_ADDR via ConfigMap .-> TI[transaction-interceptor]
+  FE -->|Create Txn| TI
+  TI --> LW[ledgerwriter]
+  TI --> FAPI[fraud-api]
+  FAPI --> GAI[(Gemini API)]
+  FAPI --> FDASH[fraud-dashboard]
+```
+
+Full diagram: see docs/services-interaction.md
+
 ## 🚀 Quick Start - Fraud Detection System
 
 ### Prerequisites

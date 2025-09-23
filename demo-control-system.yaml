@@ -1,0 +1,239 @@
+# Demo Control System for Bank of Anthos Fraud Detection
+# This provides controls to manage transaction generation and API usage during demos
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-control-system
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-control-system
+  template:
+    metadata:
+      labels:
+        app: demo-control-system
+    spec:
+      containers:
+        - name: demo-controller
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KUBECONFIG
+              value: "/tmp/kubeconfig"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install flask kubernetes requests
+              mkdir -p /app && cd /app
+              cat > app.py << 'EOF'
+              from flask import Flask, render_template, request, jsonify, redirect, url_for
+              import subprocess
+              import json
+              import requests
+              import os
+              from datetime import datetime
+
+              app = Flask(__name__)
+
+              def run_kubectl(command):
+                  """Execute kubectl command and return result"""
+                  try:
+                      result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                      return {"success": result.returncode == 0, "output": result.stdout, "error": result.stderr}
+                  except Exception as e:
+                      return {"success": False, "error": str(e)}
+
+              def get_loadgenerator_status():
+                  """Check if loadgenerator is running"""
+                  result = run_kubectl("kubectl get pods -n default | grep loadgenerator")
+                  return result["success"] and "Running" in result["output"]
+
+              def get_transaction_count():
+                  """Get current transaction count from fraud API"""
+                  try:
+                      response = requests.get("http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000/transactions", timeout=5)
+                      if response.status_code == 200:
+                          data = response.json()
+                          return len(data.get('transactions', []))
+                  except:
+                      pass
+                  return 0
+
+              def get_gemini_usage():
+                  """Get Gemini API usage statistics"""
+                  try:
+                      response = requests.get("http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000/", timeout=5)
+                      if response.status_code == 200:
+                          data = response.json()
+                          return {
+                              "gemini_configured": data.get("gemini_configured", False),
+                              "monitored_transactions": data.get("monitored_transactions", 0),
+                              "fraud_alerts": data.get("fraud_alerts", 0)
+                          }
+                  except:
+                      pass
+                  return {"gemini_configured": False, "monitored_transactions": 0, "fraud_alerts": 0}
+
+              @app.route('/')
+              def dashboard():
+                  loadgen_status = get_loadgenerator_status()
+                  transaction_count = get_transaction_count()
+                  gemini_stats = get_gemini_usage()
+                  
+                  return render_template_string('''
+              <!DOCTYPE html>
+              <html>
+              <head>
+                  <title>Demo Control System - Bank of Anthos Fraud Detection</title>
+                  <style>
+                      body { font-family: 'Roboto', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+                      .container { max-width: 1200px; margin: 0 auto; }
+                      .header { background: #008A20; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+                      .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                      .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+                      .status-card { background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #008A20; }
+                      .control-btn { background: #008A20; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin: 5px; }
+                      .danger-btn { background: #dc3545; }
+                      .warning-btn { background: #ffc107; color: black; }
+                      .success { color: #28a745; font-weight: bold; }
+                      .danger { color: #dc3545; font-weight: bold; }
+                      .warning { color: #ffc107; font-weight: bold; }
+                  </style>
+              </head>
+              <body>
+                  <div class="container">
+                      <div class="header">
+                          <h1>🎮 Demo Control System</h1>
+                          <p>Bank of Anthos Fraud Detection - GKE Turns 10 Hackathon</p>
+                          <p>Last updated: {{ current_time }}</p>
+                      </div>
+                      
+                      <div class="status-grid">
+                          <div class="status-card">
+                              <h3>🤖 Load Generator Status</h3>
+                              <p class="{{ 'success' if loadgen_running else 'danger' }}">
+                                  {{ '🟢 Running (Generating Transactions)' if loadgen_running else '🔴 Stopped' }}
+                              </p>
+                              <div>
+                                  {% if loadgen_running %}
+                                      <button class="control-btn danger-btn" onclick="controlLoadgen('stop')">⏹️ Stop Load Generator</button>
+                                  {% else %}
+                                      <button class="control-btn" onclick="controlLoadgen('start')">▶️ Start Load Generator</button>
+                                  {% endif %}
+                              </div>
+                          </div>
+                          
+                          <div class="status-card">
+                              <h3>📊 Transaction Statistics</h3>
+                              <p><strong>Total Transactions:</strong> {{ transaction_count }}</p>
+                              <p><strong>Monitored by AI:</strong> {{ gemini_stats.monitored_transactions }}</p>
+                              <p><strong>Fraud Alerts:</strong> {{ gemini_stats.fraud_alerts }}</p>
+                          </div>
+                          
+                          <div class="status-card">
+                              <h3>🧠 Gemini AI Status</h3>
+                              <p class="{{ 'success' if gemini_stats.gemini_configured else 'warning' }}">
+                                  {{ '🟢 Active' if gemini_stats.gemini_configured else '⚠️ Rate Limited' }}
+                              </p>
+                              <p><small>{{ 'AI analysis running normally' if gemini_stats.gemini_configured else 'Using enhanced fallback analysis' }}</small></p>
+                          </div>
+                      </div>
+                      
+                      <div class="card">
+                          <h3>🎯 Demo Recommendations</h3>
+                          <ul>
+                              <li><strong>For Live Demo:</strong> Stop load generator to prevent API rate limits</li>
+                              <li><strong>For Testing:</strong> Use transaction simulation in fraud dashboard</li>
+                              <li><strong>For Real Transactions:</strong> Use Bank of Anthos frontend manually</li>
+                              <li><strong>API Conservation:</strong> Load generator can consume 100+ API calls per minute</li>
+                          </ul>
+                      </div>
+                      
+                      <div class="card">
+                          <h3>🔗 Quick Links</h3>
+                          <a href="http://YOUR_DASHBOARD_EXTERNAL_IP:8501" class="control-btn">Fraud Dashboard</a>
+                          <a href="http://YOUR_BANK_OF_ANTHOS_URL" class="control-btn">Bank of Anthos</a>
+                          <a href="http://YOUR_FRAUD_API_EXTERNAL_IP:8000" class="control-btn">Fraud API</a>
+                      </div>
+                  </div>
+                  
+                  <script>
+                      function controlLoadgen(action) {
+                          fetch('/control-loadgen', {
+                              method: 'POST',
+                              headers: {'Content-Type': 'application/json'},
+                              body: JSON.stringify({action: action})
+                          })
+                          .then(response => response.json())
+                          .then(data => {
+                              alert(data.message);
+                              location.reload();
+                          })
+                          .catch(error => {
+                              alert('Error: ' + error);
+                          });
+                      }
+                      
+                      // Auto-refresh every 30 seconds
+                      setTimeout(() => location.reload(), 30000);
+                  </script>
+              </body>
+              </html>
+                  ''', 
+                  loadgen_running=loadgen_status,
+                  transaction_count=transaction_count,
+                  gemini_stats=gemini_stats,
+                  current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                  )
+
+              @app.route('/control-loadgen', methods=['POST'])
+              def control_loadgen():
+                  data = request.json
+                  action = data.get('action')
+                  
+                  if action == 'stop':
+                      result = run_kubectl("kubectl scale deployment loadgenerator --replicas=0 -n default")
+                      if result["success"]:
+                          return jsonify({"success": True, "message": "✅ Load generator stopped successfully"})
+                      else:
+                          return jsonify({"success": False, "message": f"❌ Failed to stop: {result['error']}"})
+                  
+                  elif action == 'start':
+                      result = run_kubectl("kubectl scale deployment loadgenerator --replicas=1 -n default")
+                      if result["success"]:
+                          return jsonify({"success": True, "message": "✅ Load generator started successfully"})
+                      else:
+                          return jsonify({"success": False, "message": f"❌ Failed to start: {result['error']}"})
+                  
+                  return jsonify({"success": False, "message": "❌ Invalid action"})
+
+              if __name__ == '__main__':
+                  app.run(host='0.0.0.0', port=8080, debug=True)
+              EOF
+
+              python app.py
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-control-system
+  namespace: fraud-detection
+spec:
+  type: LoadBalancer
+  selector:
+    app: demo-control-system
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

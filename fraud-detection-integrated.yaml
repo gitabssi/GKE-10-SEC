@@ -1,0 +1,976 @@
+# Bank of Anthos Integrated Fraud Detection System
+# This creates a fraud detection system that integrates with Bank of Anthos transactions
+# and provides a Bank of Anthos styled dashboard
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-api-integrated
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-api-integrated
+  template:
+    metadata:
+      labels:
+        app: fraud-api-integrated
+    spec:
+      containers:
+        - name: fraud-api
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GEMINI_API_KEY
+              value: "YOUR_GEMINI_API_KEY_HERE"
+            - name: BANK_OF_ANTHOS_FRONTEND_URL
+              value: "http://frontend.default.svc.cluster.local"
+            - name: LEDGERWRITER_URL
+              value: "http://ledgerwriter.default.svc.cluster.local:8080"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install fastapi uvicorn google-generativeai requests
+              mkdir -p /app && cd /app
+              cat > main.py << 'EOF'
+              from fastapi import FastAPI, HTTPException
+              from pydantic import BaseModel
+              import google.generativeai as genai
+              import os
+              import json
+              import requests
+              from datetime import datetime
+              import logging
+              from typing import Optional
+              import time
+
+              logging.basicConfig(level=logging.INFO)
+              logger = logging.getLogger(__name__)
+
+              # Configure Gemini AI
+              GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+              if GEMINI_API_KEY:
+                  try:
+                      genai.configure(api_key=GEMINI_API_KEY)
+                      model = genai.GenerativeModel('gemini-1.5-flash')
+                      logger.info("✅ Gemini AI configured successfully")
+                  except Exception as e:
+                      logger.error(f"❌ Gemini AI configuration failed: {e}")
+                      model = None
+              else:
+                  logger.warning("⚠️ Gemini API key not found")
+                  model = None
+
+              app = FastAPI(title="Bank of Anthos - AI Fraud Detection", version="2.0.0")
+
+              # In-memory storage for transaction monitoring
+              transaction_history = []
+              fraud_alerts = []
+
+              class BankTransaction(BaseModel):
+                  fromAccountNum: str
+                  fromRoutingNum: str
+                  toAccountNum: str
+                  toRoutingNum: str
+                  amount: int  # Amount in cents
+                  uuid: str
+                  timestamp: Optional[str] = None
+
+              class FraudAnalysis(BaseModel):
+                  transactionId: str
+                  fraud_score: float
+                  risk_level: str
+                  confidence: float
+                  explanation: str
+                  recommendation: str
+                  processing_time_ms: float
+                  ai_powered: bool
+                  bank_transaction: dict
+
+              @app.get("/")
+              async def root():
+                  return {
+                      "service": "Bank of Anthos - AI Fraud Detection",
+                      "version": "2.0.0",
+                      "status": "running",
+                      "gemini_configured": model is not None,
+                      "integration": "Bank of Anthos Transaction Monitor",
+                      "monitored_transactions": len(transaction_history),
+                      "fraud_alerts": len([a for a in fraud_alerts if a['risk_level'] in ['HIGH', 'CRITICAL']])
+                  }
+
+              @app.get("/health")
+              async def health():
+                  return {
+                      "status": "healthy", 
+                      "gemini_configured": model is not None,
+                      "monitoring_active": True,
+                      "transactions_processed": len(transaction_history)
+                  }
+
+              @app.post("/analyze-bank-transaction")
+              async def analyze_bank_transaction(transaction: BankTransaction):
+                  """Analyze a Bank of Anthos transaction for fraud"""
+                  start_time = datetime.utcnow()
+                  transaction_id = f"txn_{int(time.time())}_{transaction.uuid[:8]}"
+                  
+                  try:
+                      # Convert cents to dollars
+                      amount_dollars = transaction.amount / 100.0
+                      
+                      logger.info(f"🔍 Analyzing Bank of Anthos transaction: ${amount_dollars} from {transaction.fromAccountNum} to {transaction.toAccountNum}")
+                      
+                      # Store transaction for monitoring
+                      transaction_record = {
+                          "id": transaction_id,
+                          "timestamp": datetime.utcnow().isoformat(),
+                          "amount": amount_dollars,
+                          "from_account": transaction.fromAccountNum,
+                          "to_account": transaction.toAccountNum,
+                          "from_routing": transaction.fromRoutingNum,
+                          "to_routing": transaction.toRoutingNum,
+                          "uuid": transaction.uuid
+                      }
+                      transaction_history.append(transaction_record)
+                      
+                      # Try Gemini AI first, fallback to enhanced analysis if needed
+                      gemini_analysis = None
+                      if model:
+                          try:
+                              # AI-powered analysis with banking context
+                              prompt = f"""
+                              You are analyzing a real Bank of Anthos transaction for fraud detection:
+
+                              Transaction Details:
+                              - Amount: ${amount_dollars}
+                              - From Account: {transaction.fromAccountNum}
+                              - To Account: {transaction.toAccountNum}
+                              - From Routing: {transaction.fromRoutingNum}
+                              - To Routing: {transaction.toRoutingNum}
+                              - Transaction UUID: {transaction.uuid}
+
+                              Banking Context:
+                              - This is a real banking transaction from Bank of Anthos
+                              - Internal routing number indicates local bank transfers
+                              - Account numbers are 10-digit bank account identifiers
+
+                              Analyze for fraud patterns and provide detailed reasoning:
+                              {{
+                                  "fraud_score": 0.0-1.0,
+                                  "risk_level": "LOW|MEDIUM|HIGH|CRITICAL",
+                                  "confidence": 0.0-1.0,
+                                  "explanation": "Detailed analysis of banking transaction patterns, risk factors, and reasoning",
+                                  "recommendation": "APPROVE|REVIEW|BLOCK",
+                                  "risk_factors": ["list", "of", "specific", "risk", "factors"]
+                              }}
+                              """
+
+                              response = model.generate_content(prompt)
+                              gemini_text = response.text.strip()
+
+                              # Try to parse JSON response
+                              if gemini_text.startswith('```json'):
+                                  gemini_text = gemini_text.replace('```json', '').replace('```', '').strip()
+                              elif gemini_text.startswith('```'):
+                                  gemini_text = gemini_text.replace('```', '').strip()
+
+                              gemini_analysis = json.loads(gemini_text)
+                              logger.info(f"✅ Gemini AI analysis successful for {transaction_id}")
+
+                          except Exception as e:
+                              logger.warning(f"⚠️ Gemini AI analysis failed for {transaction_id}: {str(e)}")
+                              gemini_analysis = None
+
+                      if gemini_analysis:
+                          # Use Gemini AI results
+                          analysis = FraudAnalysis(
+                              transactionId=transaction_id,
+                              fraud_score=float(gemini_analysis.get('fraud_score', 0.5)),
+                              risk_level=gemini_analysis.get('risk_level', 'MEDIUM'),
+                              confidence=float(gemini_analysis.get('confidence', 0.8)),
+                              explanation=gemini_analysis.get('explanation', 'AI analysis completed'),
+                              recommendation=gemini_analysis.get('recommendation', 'REVIEW'),
+                              processing_time_ms=(datetime.utcnow() - start_time).total_seconds() * 1000,
+                              ai_powered=True,
+                              bank_transaction=transaction_record
+                          )
+                      else:
+                          # Enhanced fallback analysis for bank transactions
+                          fraud_score = calculate_bank_fraud_score(transaction_record)
+                          risk_level = get_risk_level(fraud_score)
+
+                          # Generate detailed fallback explanation
+                          risk_factors = []
+                          explanation_parts = []
+
+                          if amount_dollars >= 1000000:
+                              risk_factors.append("extremely large amount")
+                              explanation_parts.append(f"The transaction involves an extremely large amount (${amount_dollars:,.2f}) which is highly unusual for most personal or even small business accounts.")
+                          elif amount_dollars >= 10000:
+                              risk_factors.append("large amount")
+                              explanation_parts.append(f"The transaction amount (${amount_dollars:,.2f}) is significant and warrants additional scrutiny.")
+                          elif amount_dollars >= 1000:
+                              risk_factors.append("moderate amount")
+                              explanation_parts.append(f"The transaction amount (${amount_dollars:,.2f}) is within normal ranges but requires monitoring.")
+                          else:
+                              explanation_parts.append(f"The transaction amount (${amount_dollars:,.2f}) is relatively small, reducing immediate fraud risk.")
+
+                          if transaction.fromRoutingNum != transaction.toRoutingNum:
+                              risk_factors.append("cross-bank transfer")
+                              explanation_parts.append("This is a cross-bank transfer which may require additional verification.")
+                          else:
+                              explanation_parts.append("This is an internal bank transfer within the same institution.")
+
+                          if fraud_score > 0.7:
+                              explanation_parts.append("Multiple risk factors indicate this transaction should be blocked pending manual review.")
+                          elif fraud_score > 0.4:
+                              explanation_parts.append("Some risk indicators suggest this transaction should be reviewed by fraud analysts.")
+                          else:
+                              explanation_parts.append("The transaction appears to have low fraud risk based on available patterns.")
+
+                          detailed_explanation = " ".join(explanation_parts)
+
+                          analysis = FraudAnalysis(
+                              transactionId=transaction_id,
+                              fraud_score=fraud_score,
+                              risk_level=risk_level,
+                              confidence=0.75,
+                              explanation=detailed_explanation,
+                              recommendation="BLOCK" if fraud_score > 0.7 else "REVIEW" if fraud_score > 0.4 else "APPROVE",
+                              processing_time_ms=(datetime.utcnow() - start_time).total_seconds() * 1000,
+                              ai_powered=False,
+                              bank_transaction=transaction_record
+                          )
+
+                      
+                      # Store fraud analysis
+                      fraud_alerts.append(analysis.dict())
+                      
+                      # Log high-risk transactions
+                      if analysis.fraud_score > 0.6:
+                          logger.warning(f"🚨 HIGH RISK TRANSACTION: {transaction_id} - Score: {analysis.fraud_score:.2f}")
+                      
+                      return analysis
+                      
+                  except Exception as e:
+                      logger.error(f"❌ Bank transaction analysis failed: {str(e)}")
+                      processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                      
+                      return FraudAnalysis(
+                          transactionId=transaction_id,
+                          fraud_score=0.5,
+                          risk_level="MEDIUM",
+                          confidence=0.3,
+                          explanation=f"Analysis error occurred: {str(e)}. Using safe default assessment.",
+                          recommendation="REVIEW",
+                          processing_time_ms=processing_time,
+                          ai_powered=False,
+                          bank_transaction=transaction_record if 'transaction_record' in locals() else {}
+                      )
+
+              def calculate_bank_fraud_score(transaction: dict) -> float:
+                  """Enhanced fraud scoring for bank transactions"""
+                  score = 0.0
+                  amount = transaction['amount']
+                  
+                  # Amount-based scoring (banking context)
+                  if amount > 10000:  # Large transfers
+                      score += 0.7
+                  elif amount > 5000:
+                      score += 0.5
+                  elif amount > 2000:
+                      score += 0.3
+                  elif amount > 1000:
+                      score += 0.2
+                  elif amount < 1:  # Micro transactions
+                      score += 0.4
+                  
+                  # Account pattern analysis
+                  from_acct = transaction['from_account']
+                  to_acct = transaction['to_account']
+                  
+                  # Check for suspicious account patterns
+                  if from_acct == to_acct:
+                      score += 0.8  # Self-transfer (should be blocked by validator)
+                  
+                  # Routing analysis
+                  if transaction['from_routing'] != transaction['to_routing']:
+                      score += 0.2  # External transfer
+                  
+                  # Time-based analysis (simplified)
+                  try:
+                      hour = datetime.fromisoformat(transaction['timestamp'].replace('Z', '+00:00')).hour
+                      if 2 <= hour <= 5:  # Late night transactions
+                          score += 0.3
+                      elif 22 <= hour or hour <= 6:  # Off-hours
+                          score += 0.1
+                  except:
+                      pass
+                  
+                  return min(score, 0.95)
+
+              def get_risk_level(score: float) -> str:
+                  """Convert fraud score to risk level"""
+                  if score >= 0.8:
+                      return "CRITICAL"
+                  elif score >= 0.6:
+                      return "HIGH"
+                  elif score >= 0.3:
+                      return "MEDIUM"
+                  else:
+                      return "LOW"
+
+              @app.get("/transactions")
+              async def get_monitored_transactions():
+                  """Get all monitored Bank of Anthos transactions"""
+                  return {
+                      "total_transactions": len(transaction_history),
+                      "transactions": transaction_history[-50:],  # Last 50 transactions
+                      "fraud_alerts": len([a for a in fraud_alerts if a['fraud_score'] > 0.5])
+                  }
+
+              @app.get("/fraud-alerts")
+              async def get_fraud_alerts():
+                  """Get all fraud analysis results"""
+                  return {
+                      "total_alerts": len(fraud_alerts),
+                      "high_risk_alerts": len([a for a in fraud_alerts if a['fraud_score'] > 0.6]),
+                      "alerts": fraud_alerts[-20:]  # Last 20 alerts
+                  }
+
+              if __name__ == "__main__":
+                  import uvicorn
+                  logger.info("🚀 Starting Bank of Anthos AI Fraud Detection System")
+                  logger.info("🔗 Integrated with Bank of Anthos transaction monitoring")
+                  uvicorn.run(app, host="0.0.0.0", port=8000)
+              EOF
+              python main.py
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-api-integrated
+  namespace: fraud-detection
+spec:
+  type: LoadBalancer
+  selector:
+    app: fraud-api-integrated
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+# Bank of Anthos Styled Fraud Detection Dashboard
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-dashboard-integrated
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-dashboard-integrated
+  template:
+    metadata:
+      labels:
+        app: fraud-dashboard-integrated
+    spec:
+      containers:
+        - name: fraud-dashboard
+          image: python:3.11-slim
+          ports:
+            - containerPort: 5000
+          env:
+            - name: FRAUD_API_URL
+              value: "http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000"
+            - name: BANK_OF_ANTHOS_URL
+              value: "http://YOUR_BANK_OF_ANTHOS_URL"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install flask requests plotly pandas jinja2
+              mkdir -p /app/templates /app/static/styles /app/static/scripts && cd /app
+
+              # Create Bank of Anthos styled CSS
+              cat > static/styles/fraud-detection.css << 'EOF'
+              /* Bank of Anthos Fraud Detection Styling */
+              html, body {
+                  font-family: 'Roboto', sans-serif !important;
+                  font-size: 1.1rem;
+                  margin: 0;
+                  padding: 0;
+                  background-color: #ffffff !important;
+              }
+
+              .header-title {
+                  font-weight: 500;
+                  color: #343434;
+              }
+
+              .navbar-top {
+                  background-color: white;
+                  min-height: 80px;
+                  color: white;
+                  position: relative;
+                  border-bottom: 1px solid #e0e0e0;
+              }
+
+              .material-icons {
+                  color: #008A20;
+                  vertical-align: middle !important;
+              }
+
+              .fraud-card {
+                  border: 1px solid #e0e0e0;
+                  border-radius: 8px;
+                  margin-bottom: 1rem;
+                  background: white;
+                  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              }
+
+              .fraud-card-header {
+                  background-color: #f8f9fa;
+                  padding: 1rem;
+                  border-bottom: 1px solid #e0e0e0;
+                  font-weight: 500;
+                  color: #343434;
+              }
+
+              .fraud-card-body {
+                  padding: 1rem;
+              }
+
+              .risk-low { color: #28a745; font-weight: bold; }
+              .risk-medium { color: #ffc107; font-weight: bold; }
+              .risk-high { color: #dc3545; font-weight: bold; }
+              .risk-critical {
+                  color: #dc3545;
+                  font-weight: bold;
+                  background: #fff5f5;
+                  padding: 2px 8px;
+                  border-radius: 4px;
+              }
+
+              .transaction-item {
+                  border-left: 4px solid #008A20;
+                  padding: 1rem;
+                  margin-bottom: 0.5rem;
+                  background: #f8f9fa;
+                  border-radius: 0 4px 4px 0;
+              }
+
+              .alert-high-risk {
+                  border-left-color: #dc3545 !important;
+                  background: #fff5f5 !important;
+              }
+
+              .btn-primary {
+                  background-color: #008A20;
+                  border-color: #008A20;
+                  color: white;
+                  padding: 0.5rem 1rem;
+                  border-radius: 4px;
+                  text-decoration: none;
+                  display: inline-block;
+                  border: none;
+                  cursor: pointer;
+              }
+
+              .btn-primary:hover {
+                  background-color: #006b1a;
+                  border-color: #006b1a;
+              }
+
+              .metric-card {
+                  text-align: center;
+                  padding: 1rem;
+                  border-radius: 8px;
+                  margin-bottom: 1rem;
+                  background: white;
+                  border: 1px solid #e0e0e0;
+              }
+
+              .metric-value {
+                  font-size: 2rem;
+                  font-weight: bold;
+                  color: #008A20;
+              }
+
+              .metric-label {
+                  color: #666;
+                  font-size: 0.9rem;
+              }
+
+              .container {
+                  max-width: 1200px;
+                  margin: 0 auto;
+                  padding: 2rem;
+              }
+
+              .row {
+                  display: flex;
+                  flex-wrap: wrap;
+                  margin: -0.5rem;
+              }
+
+              .col {
+                  flex: 1;
+                  padding: 0.5rem;
+              }
+
+              .col-4 {
+                  flex: 0 0 33.333333%;
+                  padding: 0.5rem;
+              }
+
+              .col-6 {
+                  flex: 0 0 50%;
+                  padding: 0.5rem;
+              }
+
+              .col-12 {
+                  flex: 0 0 100%;
+                  padding: 0.5rem;
+              }
+
+              .text-center {
+                  text-align: center;
+              }
+
+              .mb-3 {
+                  margin-bottom: 1rem;
+              }
+
+              .form-control {
+                  width: 100%;
+                  padding: 0.5rem;
+                  border: 1px solid #ccc;
+                  border-radius: 4px;
+                  font-size: 1rem;
+              }
+
+              .form-group {
+                  margin-bottom: 1rem;
+              }
+
+              label {
+                  display: block;
+                  margin-bottom: 0.5rem;
+                  font-weight: 500;
+                  color: #343434;
+              }
+              EOF
+
+              # Create Flask application
+              cat > app.py << 'EOF'
+              from flask import Flask, render_template, request, jsonify
+              import requests
+              import json
+              from datetime import datetime
+              import logging
+              import os
+
+              logging.basicConfig(level=logging.INFO)
+              logger = logging.getLogger(__name__)
+
+              app = Flask(__name__)
+
+              FRAUD_API_URL = os.getenv("FRAUD_API_URL", "http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000")
+              BANK_OF_ANTHOS_URL = os.getenv("BANK_OF_ANTHOS_URL", "http://YOUR_BANK_OF_ANTHOS_URL")
+
+              @app.route('/')
+              def dashboard():
+                  """Main fraud detection dashboard"""
+                  try:
+                      # Get system status
+                      health_response = requests.get(f"{FRAUD_API_URL}/health", timeout=5)
+                      system_status = health_response.json() if health_response.status_code == 200 else {}
+
+                      # Get recent transactions
+                      transactions_response = requests.get(f"{FRAUD_API_URL}/transactions", timeout=5)
+                      transactions_data = transactions_response.json() if transactions_response.status_code == 200 else {}
+
+                      # Get fraud alerts
+                      alerts_response = requests.get(f"{FRAUD_API_URL}/fraud-alerts", timeout=5)
+                      alerts_data = alerts_response.json() if alerts_response.status_code == 200 else {}
+
+                      return render_template('dashboard.html',
+                                           system_status=system_status,
+                                           transactions=transactions_data.get('transactions', []),
+                                           alerts=alerts_data.get('alerts', []),
+                                           bank_url=BANK_OF_ANTHOS_URL)
+                  except Exception as e:
+                      logger.error(f"Dashboard error: {e}")
+                      return render_template('dashboard.html',
+                                           system_status={},
+                                           transactions=[],
+                                           alerts=[],
+                                           bank_url=BANK_OF_ANTHOS_URL,
+                                           error=str(e))
+
+              @app.route('/api/test-transaction', methods=['POST'])
+              def test_transaction():
+                  """Test a transaction for fraud"""
+                  try:
+                      data = request.json
+
+                      # Create Bank of Anthos transaction format
+                      bank_transaction = {
+                          "fromAccountNum": data.get('fromAccount', '1234567890'),
+                          "fromRoutingNum": data.get('fromRouting', '123456789'),
+                          "toAccountNum": data.get('toAccount', '0987654321'),
+                          "toRoutingNum": data.get('toRouting', '123456789'),
+                          "amount": int(float(data.get('amount', 100)) * 100),  # Convert to cents
+                          "uuid": f"test_{int(datetime.utcnow().timestamp())}"
+                      }
+
+                      # Send to fraud detection API
+                      response = requests.post(f"{FRAUD_API_URL}/analyze-bank-transaction",
+                                             json=bank_transaction, timeout=30)
+
+                      if response.status_code == 200:
+                          return jsonify(response.json())
+                      else:
+                          return jsonify({"error": f"API error: {response.status_code}"}), 500
+
+                  except Exception as e:
+                      logger.error(f"Test transaction error: {e}")
+                      return jsonify({"error": str(e)}), 500
+
+              @app.route('/api/system-status')
+              def system_status():
+                  """Get current system status"""
+                  try:
+                      response = requests.get(f"{FRAUD_API_URL}/health", timeout=5)
+                      return jsonify(response.json() if response.status_code == 200 else {})
+                  except Exception as e:
+                      return jsonify({"error": str(e)}), 500
+
+              if __name__ == '__main__':
+                  logger.info("🚀 Starting Bank of Anthos Fraud Detection Dashboard")
+                  app.run(host='0.0.0.0', port=5000, debug=False)
+              EOF
+
+              # Create Bank of Anthos styled HTML template
+              cat > templates/dashboard.html << 'EOF'
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Bank of Anthos - AI Fraud Detection</title>
+                  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+                  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+                  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+                  <link rel="stylesheet" href="{{ url_for('static', filename='styles/fraud-detection.css') }}">
+              </head>
+              <body>
+                  <!-- Bank of Anthos Navigation -->
+                  <nav class="navbar navbar-expand-lg navbar-top">
+                      <div class="container">
+                          <a class="navbar-brand" href="{{ bank_url }}">
+                              <span class="material-icons" style="font-size: 2rem;">account_balance</span>
+                              <span class="header-title ms-2">Bank of Anthos</span>
+                          </a>
+                          <div class="navbar-nav ms-auto">
+                              <span class="nav-item header-title">AI Fraud Detection</span>
+                          </div>
+                      </div>
+                  </nav>
+
+                  <div class="container">
+                      <!-- Header -->
+                      <div class="row mb-4">
+                          <div class="col-12 text-center">
+                              <h1 class="header-title">
+                                  <span class="material-icons" style="font-size: 3rem;">security</span>
+                                  AI Fraud Detection System
+                              </h1>
+                              <p class="text-muted">Real-time transaction monitoring with Google Gemini AI</p>
+                              <a href="{{ bank_url }}" class="btn btn-primary">
+                                  <span class="material-icons">arrow_back</span>
+                                  Back to Bank of Anthos
+                              </a>
+                          </div>
+                      </div>
+
+                      <!-- System Status Cards -->
+                      <div class="row mb-4">
+                          <div class="col-4">
+                              <div class="metric-card">
+                                  <div class="metric-value">{{ system_status.get('transactions_processed', 0) }}</div>
+                                  <div class="metric-label">Transactions Monitored</div>
+                              </div>
+                          </div>
+                          <div class="col-4">
+                              <div class="metric-card">
+                                  <div class="metric-value">{{ alerts|selectattr('fraud_score', '>', 0.6)|list|length }}</div>
+                                  <div class="metric-label">High Risk Alerts</div>
+                              </div>
+                          </div>
+                          <div class="col-4">
+                              <div class="metric-card">
+                                  <div class="metric-value">
+                                      {% if system_status.get('gemini_configured') %}
+                                          <span class="material-icons" style="color: #28a745;">check_circle</span>
+                                      {% else %}
+                                          <span class="material-icons" style="color: #ffc107;">warning</span>
+                                      {% endif %}
+                                  </div>
+                                  <div class="metric-label">
+                                      {% if system_status.get('gemini_configured') %}
+                                          Gemini AI Active
+                                      {% else %}
+                                          Fallback Mode
+                                      {% endif %}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+
+                      <!-- Test Transaction Section -->
+                      <div class="row mb-4">
+                          <div class="col-12">
+                              <div class="fraud-card">
+                                  <div class="fraud-card-header">
+                                      <span class="material-icons">science</span>
+                                      Test Bank Transaction
+                                  </div>
+                                  <div class="fraud-card-body">
+                                      <form id="testTransactionForm">
+                                          <div class="row">
+                                              <div class="col-6">
+                                                  <div class="form-group">
+                                                      <label>From Account</label>
+                                                      <input type="text" class="form-control" id="fromAccount" value="1234567890" maxlength="10">
+                                                  </div>
+                                              </div>
+                                              <div class="col-6">
+                                                  <div class="form-group">
+                                                      <label>To Account</label>
+                                                      <input type="text" class="form-control" id="toAccount" value="0987654321" maxlength="10">
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <div class="row">
+                                              <div class="col-6">
+                                                  <div class="form-group">
+                                                      <label>Amount ($)</label>
+                                                      <input type="number" class="form-control" id="amount" value="100.00" step="0.01" min="0.01">
+                                                  </div>
+                                              </div>
+                                              <div class="col-6">
+                                                  <div class="form-group">
+                                                      <label>Routing Number</label>
+                                                      <input type="text" class="form-control" id="routing" value="123456789" maxlength="9">
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <button type="submit" class="btn btn-primary">
+                                              <span class="material-icons">analytics</span>
+                                              Analyze Transaction
+                                          </button>
+                                      </form>
+                                      <div id="analysisResult" class="mt-3" style="display: none;"></div>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+
+                      <!-- Recent Transactions -->
+                      {% if transactions %}
+                      <div class="row mb-4">
+                          <div class="col-12">
+                              <div class="fraud-card">
+                                  <div class="fraud-card-header">
+                                      <span class="material-icons">history</span>
+                                      Recent Bank of Anthos Transactions
+                                  </div>
+                                  <div class="fraud-card-body">
+                                      {% for transaction in transactions[-10:] %}
+                                      <div class="transaction-item">
+                                          <div class="row">
+                                              <div class="col-8">
+                                                  <strong>${{ "%.2f"|format(transaction.amount) }}</strong>
+                                                  from {{ transaction.from_account }} to {{ transaction.to_account }}
+                                                  <br>
+                                                  <small class="text-muted">{{ transaction.timestamp }}</small>
+                                              </div>
+                                              <div class="col-4 text-end">
+                                                  <span class="badge bg-success">Monitored</span>
+                                              </div>
+                                          </div>
+                                      </div>
+                                      {% endfor %}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                      {% endif %}
+
+                      <!-- Fraud Alerts -->
+                      {% if alerts %}
+                      <div class="row mb-4">
+                          <div class="col-12">
+                              <div class="fraud-card">
+                                  <div class="fraud-card-header">
+                                      <span class="material-icons">warning</span>
+                                      Recent Fraud Analysis Results
+                                  </div>
+                                  <div class="fraud-card-body">
+                                      {% for alert in alerts[-5:] %}
+                                      <div class="transaction-item {% if alert.fraud_score > 0.6 %}alert-high-risk{% endif %}">
+                                          <div class="row">
+                                              <div class="col-8">
+                                                  <strong>Transaction {{ alert.transactionId }}</strong>
+                                                  <br>
+                                                  <span class="risk-{{ alert.risk_level.lower() }}">{{ alert.risk_level }} RISK</span>
+                                                  - Score: {{ "%.3f"|format(alert.fraud_score) }}
+                                                  <br>
+                                                  <small>{{ alert.explanation[:100] }}...</small>
+                                              </div>
+                                              <div class="col-4 text-end">
+                                                  {% if alert.recommendation == 'APPROVE' %}
+                                                      <span class="badge bg-success">{{ alert.recommendation }}</span>
+                                                  {% elif alert.recommendation == 'REVIEW' %}
+                                                      <span class="badge bg-warning">{{ alert.recommendation }}</span>
+                                                  {% else %}
+                                                      <span class="badge bg-danger">{{ alert.recommendation }}</span>
+                                                  {% endif %}
+                                                  <br>
+                                                  <small class="text-muted">
+                                                      {% if alert.ai_powered %}🤖 Gemini AI{% else %}🔧 Fallback{% endif %}
+                                                  </small>
+                                              </div>
+                                          </div>
+                                      </div>
+                                      {% endfor %}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                      {% endif %}
+
+                      <!-- Footer -->
+                      <div class="row">
+                          <div class="col-12 text-center">
+                              <p class="text-muted">
+                                  <strong>GKE Turns 10 Hackathon</strong> |
+                                  AI-Powered Fraud Detection |
+                                  Google Cloud + Gemini AI |
+                                  Integrated with Bank of Anthos
+                              </p>
+                          </div>
+                      </div>
+                  </div>
+
+                  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+                  <script>
+                  document.getElementById('testTransactionForm').addEventListener('submit', async function(e) {
+                      e.preventDefault();
+
+                      const resultDiv = document.getElementById('analysisResult');
+                      resultDiv.style.display = 'block';
+                      resultDiv.innerHTML = '<div class="text-center"><span class="material-icons">hourglass_empty</span> Analyzing with AI...</div>';
+
+                      try {
+                          const response = await fetch('/api/test-transaction', {
+                              method: 'POST',
+                              headers: {
+                                  'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                  fromAccount: document.getElementById('fromAccount').value,
+                                  toAccount: document.getElementById('toAccount').value,
+                                  amount: document.getElementById('amount').value,
+                                  fromRouting: document.getElementById('routing').value,
+                                  toRouting: document.getElementById('routing').value
+                              })
+                          });
+
+                          const result = await response.json();
+
+                          if (response.ok) {
+                              const riskClass = result.risk_level.toLowerCase();
+                              const aiMode = result.ai_powered ? '🤖 Gemini AI' : '🔧 Fallback';
+
+                              resultDiv.innerHTML = `
+                                  <div class="fraud-card">
+                                      <div class="fraud-card-header">Analysis Results</div>
+                                      <div class="fraud-card-body">
+                                          <div class="row">
+                                              <div class="col-4 text-center">
+                                                  <div class="metric-value">${result.fraud_score.toFixed(3)}</div>
+                                                  <div class="metric-label">Fraud Score</div>
+                                              </div>
+                                              <div class="col-4 text-center">
+                                                  <div class="metric-value risk-${riskClass}">${result.risk_level}</div>
+                                                  <div class="metric-label">Risk Level</div>
+                                              </div>
+                                              <div class="col-4 text-center">
+                                                  <div class="metric-value">${result.confidence.toFixed(3)}</div>
+                                                  <div class="metric-label">Confidence</div>
+                                              </div>
+                                          </div>
+                                          <hr>
+                                          <p><strong>Explanation:</strong> ${result.explanation}</p>
+                                          <p><strong>Recommendation:</strong> <span class="risk-${riskClass}">${result.recommendation}</span></p>
+                                          <p><small>Analysis: ${aiMode} | Processing time: ${result.processing_time_ms.toFixed(1)}ms</small></p>
+                                      </div>
+                                  </div>
+                              `;
+                          } else {
+                              resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${result.error}</div>`;
+                          }
+                      } catch (error) {
+                          resultDiv.innerHTML = `<div class="alert alert-danger">Connection error: ${error.message}</div>`;
+                      }
+                  });
+
+                  // Auto-refresh system status every 30 seconds
+                  setInterval(async function() {
+                      try {
+                          const response = await fetch('/api/system-status');
+                          const status = await response.json();
+                          // Update status indicators if needed
+                      } catch (error) {
+                          console.log('Status update failed:', error);
+                      }
+                  }, 30000);
+                  </script>
+              </body>
+              </html>
+              EOF
+
+              python app.py
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-dashboard-integrated
+  namespace: fraud-detection
+spec:
+  type: LoadBalancer
+  selector:
+    app: fraud-dashboard-integrated
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000

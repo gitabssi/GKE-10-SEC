@@ -14,7 +14,7 @@ metadata:
   namespace: fraud-detection
 type: Opaque
 data:
-  GEMINI_API_KEY: QUl6YVN5QjV0WlZ3WmVISlg2R3dSRTdkdVhRUm8wSUtXalhKZG00 # GEMINI_KEY base64 encoded
+  GEMINI_API_KEY: YOUR_GEMINI_API_KEY_BASE64 # Set via CI/secret manager for production
 ---
 apiVersion: apps/v1
 kind: Deployment

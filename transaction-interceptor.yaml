@@ -1,0 +1,265 @@
+# Bank of Anthos Transaction Interceptor - Real Transaction Monitoring
+# This service intercepts actual Bank of Anthos transactions without modifying core code
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-interceptor
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transaction-interceptor
+  template:
+    metadata:
+      labels:
+        app: transaction-interceptor
+    spec:
+      containers:
+        - name: interceptor
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8080
+          env:
+            - name: LEDGERWRITER_SERVICE
+              value: "ledgerwriter.default.svc.cluster.local:8080"
+            - name: FRAUD_API_URL
+              value: "http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000"
+            - name: DASHBOARD_WEBHOOK_URL
+              value: "http://bank-anthos-dashboard.fraud-detection.svc.cluster.local:5000"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install flask requests asyncio aiohttp
+              mkdir -p /app && cd /app
+
+              # Create Transaction Interceptor Service
+              python3 -c "
+              from flask import Flask, request, jsonify, Response
+              import requests
+              import json
+              import time
+              import threading
+              import logging
+              from datetime import datetime
+              import os
+              import asyncio
+              import aiohttp
+              from concurrent.futures import ThreadPoolExecutor
+
+              logging.basicConfig(level=logging.INFO)
+              logger = logging.getLogger(__name__)
+
+              app = Flask(__name__)
+
+              # Configuration
+              LEDGERWRITER_SERVICE = os.getenv('LEDGERWRITER_SERVICE', 'ledgerwriter.default.svc.cluster.local:8080')
+              FRAUD_API_URL = os.getenv('FRAUD_API_URL', 'http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000')
+              DASHBOARD_WEBHOOK_URL = os.getenv('DASHBOARD_WEBHOOK_URL', 'http://bank-anthos-dashboard.fraud-detection.svc.cluster.local:5000')
+
+              # Thread pool for async processing
+              executor = ThreadPoolExecutor(max_workers=10)
+
+              # Transaction storage for monitoring
+              intercepted_transactions = []
+
+              class TransactionInterceptor:
+                  def __init__(self):
+                      self.session = requests.Session()
+                      self.session.timeout = 30
+                      
+                  def process_transaction_async(self, transaction_data, auth_header):
+                      '''Process transaction asynchronously for fraud detection'''
+                      try:
+                          # Extract transaction details
+                          bank_transaction = {
+                              'fromAccountNum': transaction_data.get('fromAccountNum', ''),
+                              'fromRoutingNum': transaction_data.get('fromRoutingNum', ''),
+                              'toAccountNum': transaction_data.get('toAccountNum', ''),
+                              'toRoutingNum': transaction_data.get('toRoutingNum', ''),
+                              'amount': transaction_data.get('amount', 0),
+                              'uuid': transaction_data.get('uuid', f'intercepted_{int(time.time())}')
+                          }
+                          
+                          # Store intercepted transaction
+                          intercepted_transaction = {
+                              'id': bank_transaction['uuid'],
+                              'timestamp': datetime.utcnow().isoformat(),
+                              'transaction_data': bank_transaction,
+                              'status': 'intercepted',
+                              'fraud_analysis': None,
+                              'gemini_reasoning': None
+                          }
+                          intercepted_transactions.append(intercepted_transaction)
+                          
+                          logger.info(f'🔍 INTERCEPTED REAL BANK TRANSACTION: {bank_transaction[\"uuid\"]} - Amount: \${bank_transaction[\"amount\"]/100:.2f}')
+                          
+                          # Send to fraud detection API for Gemini analysis
+                          fraud_response = self.session.post(
+                              f'{FRAUD_API_URL}/analyze-bank-transaction',
+                              json=bank_transaction,
+                              timeout=30
+                          )
+                          
+                          if fraud_response.status_code == 200:
+                              fraud_result = fraud_response.json()
+                              
+                              # Update transaction with fraud analysis
+                              for txn in intercepted_transactions:
+                                  if txn['id'] == bank_transaction['uuid']:
+                                      txn['status'] = 'analyzed'
+                                      txn['fraud_analysis'] = fraud_result
+                                      txn['gemini_reasoning'] = fraud_result.get('explanation', 'No explanation provided')
+                                      break
+                              
+                              logger.info(f'🤖 GEMINI ANALYSIS COMPLETE: {bank_transaction[\"uuid\"]} - Risk Score: {fraud_result.get(\"fraud_score\", 0):.2f}')
+                              logger.info(f'💭 GEMINI REASONING: {fraud_result.get(\"explanation\", \"No explanation\")}')
+                              
+                              # Notify dashboard of new analyzed transaction
+                              try:
+                                  self.session.post(
+                                      f'{DASHBOARD_WEBHOOK_URL}/api/transaction-analyzed',
+                                      json={
+                                          'transaction_id': bank_transaction['uuid'],
+                                          'fraud_analysis': fraud_result,
+                                          'transaction_data': bank_transaction
+                                      },
+                                      timeout=5
+                                  )
+                              except Exception as e:
+                                  logger.warning(f'Failed to notify dashboard: {e}')
+                          else:
+                              logger.error(f'Fraud analysis failed for {bank_transaction[\"uuid\"]}: {fraud_response.status_code}')
+                              
+                      except Exception as e:
+                          logger.error(f'Error processing transaction {bank_transaction.get(\"uuid\", \"unknown\")}: {e}')
+
+              transaction_interceptor = TransactionInterceptor()
+
+              @app.route('/transactions', methods=['POST'])
+              def intercept_transaction():
+                  '''Intercept Bank of Anthos transactions and forward to ledgerwriter'''
+                  try:
+                      # Get the original request data
+                      transaction_data = request.get_json()
+                      auth_header = request.headers.get('Authorization', '')
+                      
+                      logger.info(f'🚨 INTERCEPTING BANK OF ANTHOS TRANSACTION: {transaction_data.get(\"uuid\", \"unknown\")}')
+                      
+                      # Forward to original ledgerwriter service
+                      headers = dict(request.headers)
+                      headers['Host'] = LEDGERWRITER_SERVICE
+                      
+                      response = requests.post(
+                          f'http://{LEDGERWRITER_SERVICE}/transactions',
+                          json=transaction_data,
+                          headers=headers,
+                          timeout=30
+                      )
+                      
+                      # If transaction was successful, process for fraud detection
+                      if response.status_code in [200, 201]:
+                          # Process asynchronously to not block the original transaction
+                          executor.submit(
+                              transaction_interceptor.process_transaction_async,
+                              transaction_data,
+                              auth_header
+                          )
+                      
+                      # Return the original response to Bank of Anthos
+                      return Response(
+                          response.content,
+                          status=response.status_code,
+                          headers=dict(response.headers)
+                      )
+                      
+                  except Exception as e:
+                      logger.error(f'Error intercepting transaction: {e}')
+                      # Fallback: try to forward to original service
+                      try:
+                          response = requests.post(
+                              f'http://{LEDGERWRITER_SERVICE}/transactions',
+                              json=request.get_json(),
+                              headers=dict(request.headers),
+                              timeout=30
+                          )
+                          return Response(
+                              response.content,
+                              status=response.status_code,
+                              headers=dict(response.headers)
+                          )
+                      except:
+                          return jsonify({'error': 'Transaction processing failed'}), 500
+
+              @app.route('/intercepted-transactions', methods=['GET'])
+              def get_intercepted_transactions():
+                  '''API endpoint to get intercepted transactions'''
+                  return jsonify({
+                      'transactions': intercepted_transactions[-50:],  # Last 50 transactions
+                      'total_intercepted': len(intercepted_transactions),
+                      'status': 'active'
+                  })
+
+              @app.route('/health', methods=['GET'])
+              def health():
+                  return jsonify({
+                      'status': 'healthy',
+                      'service': 'transaction-interceptor',
+                      'intercepted_count': len(intercepted_transactions),
+                      'ledgerwriter_target': LEDGERWRITER_SERVICE,
+                      'fraud_api_target': FRAUD_API_URL
+                  })
+
+              # Forward all other requests to original ledgerwriter
+              @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+              def proxy_to_ledgerwriter(path):
+                  '''Proxy all other requests to original ledgerwriter service'''
+                  try:
+                      url = f'http://{LEDGERWRITER_SERVICE}/{path}'
+                      
+                      response = requests.request(
+                          method=request.method,
+                          url=url,
+                          headers=dict(request.headers),
+                          data=request.get_data(),
+                          params=request.args,
+                          timeout=30
+                      )
+                      
+                      return Response(
+                          response.content,
+                          status=response.status_code,
+                          headers=dict(response.headers)
+                      )
+                  except Exception as e:
+                      logger.error(f'Error proxying request to {path}: {e}')
+                      return jsonify({'error': 'Service unavailable'}), 503
+
+              if __name__ == '__main__':
+                  logger.info('🚀 Starting Bank of Anthos Transaction Interceptor')
+                  logger.info(f'📡 Monitoring ledgerwriter at: {LEDGERWRITER_SERVICE}')
+                  logger.info(f'🤖 Fraud API endpoint: {FRAUD_API_URL}')
+                  logger.info(f'📊 Dashboard webhook: {DASHBOARD_WEBHOOK_URL}')
+                  app.run(host='0.0.0.0', port=8080, debug=False)
+              "
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-interceptor
+  namespace: fraud-detection
+spec:
+  type: ClusterIP
+  selector:
+    app: transaction-interceptor
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

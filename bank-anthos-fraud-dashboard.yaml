@@ -1,0 +1,1022 @@
+# Bank of Anthos-Inspired Fraud Detection Dashboard
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bank-anthos-fraud-dashboard
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank-anthos-fraud-dashboard
+  template:
+    metadata:
+      labels:
+        app: bank-anthos-fraud-dashboard
+    spec:
+      containers:
+        - name: fraud-dashboard
+          image: python:3.11-slim
+          ports:
+            - containerPort: 5000
+          env:
+            - name: FRAUD_API_URL
+              value: "http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000"
+            - name: BANK_OF_ANTHOS_URL
+              value: "http://34.45.238.170"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install flask requests jinja2 websockets
+              mkdir -p /app/static/styles /app/static/scripts /app/templates && cd /app
+
+              # Create Bank of Anthos CSS (exact styling)
+              cat > static/styles/bank-anthos-fraud.css << 'EOF'
+              /* Bank of Anthos Fraud Detection - Exact Design Match */
+              html, body {
+                  font-family: 'Roboto', sans-serif !important;
+                  font-size: 1.1rem;
+                  margin: 0;
+                  padding: 0;
+                  background-color: #ffffff !important;
+              }
+
+              /* Material Icons */
+              .material-icons {
+                  color: #008A20;
+                  vertical-align: middle !important;
+              }
+
+              /* Navigation */
+              .navbar-top {
+                  background-color: white;
+                  min-height: 80px;
+                  color: white;
+                  position: relative;
+                  border-bottom: 1px solid #e0e0e0;
+              }
+
+              .header-title {
+                  font-weight: 500;
+                  color: #343434;
+              }
+
+              /* Primary Action Buttons */
+              .btn-primary, .card-button {
+                  background-color: #008A20 !important;
+                  border-color: #008A20 !important;
+                  color: white !important;
+                  border-radius: 4px;
+                  font-weight: 500;
+                  min-height: 44px;
+                  font-family: 'Roboto', sans-serif;
+                  padding: 0.75rem 1.5rem;
+                  font-size: 1rem;
+                  transition: background-color 0.2s ease;
+              }
+
+              .btn-primary:hover, .card-button:hover {
+                  background-color: #006b1a !important;
+                  border-color: #006b1a !important;
+                  cursor: pointer;
+              }
+
+              /* Success Notification Banner */
+              .success-banner {
+                  background-color: #000000;
+                  color: #ffffff;
+                  padding: 1rem;
+                  width: 100%;
+                  position: fixed;
+                  top: 0;
+                  left: 0;
+                  z-index: 1050;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+              }
+
+              .success-banner .material-icons {
+                  color: #008A20;
+                  margin-right: 0.5rem;
+              }
+
+              /* Fraud Alert Banner */
+              .fraud-alert-banner {
+                  background-color: #DC3545;
+                  color: #ffffff;
+                  padding: 1rem;
+                  width: 100%;
+                  position: fixed;
+                  top: 0;
+                  left: 0;
+                  z-index: 1060;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  animation: slideDown 0.3s ease-out;
+              }
+
+              .fraud-alert-banner .material-icons {
+                  color: #ffffff;
+                  margin-right: 0.5rem;
+              }
+
+              @keyframes slideDown {
+                  from { transform: translateY(-100%); }
+                  to { transform: translateY(0); }
+              }
+
+              /* Balance Card */
+              .balance-card {
+                  background: #ffffff;
+                  border: 1px solid #e0e0e0;
+                  border-radius: 8px;
+                  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                  padding: 1.5rem;
+                  margin-bottom: 1rem;
+              }
+
+              .balance-amount {
+                  font-size: 2rem;
+                  font-weight: bold;
+                  color: #000000;
+                  margin: 0;
+              }
+
+              .balance-label {
+                  color: #666666;
+                  font-size: 0.9rem;
+                  text-transform: uppercase;
+                  margin-bottom: 0.5rem;
+              }
+
+              /* Transaction Table */
+              .transaction-table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-top: 1rem;
+              }
+
+              .transaction-table th {
+                  background-color: #f8f9fa;
+                  color: #343434;
+                  font-weight: 500;
+                  padding: 1rem;
+                  text-align: left;
+                  border-bottom: 1px solid #e0e0e0;
+              }
+
+              .transaction-table td {
+                  padding: 1rem;
+                  border-bottom: 1px solid #e0e0e0;
+                  vertical-align: middle;
+              }
+
+              /* Transaction Amounts */
+              .amount-debit {
+                  color: #DC3545;
+                  font-weight: bold;
+              }
+
+              .amount-credit {
+                  color: #28A745;
+                  font-weight: bold;
+              }
+
+              /* Suspicious Transaction Highlighting */
+              .transaction-suspicious {
+                  background-color: #FFF3CD !important;
+                  border-left: 4px solid #DC3545;
+              }
+
+              .transaction-fraudulent {
+                  background-color: #f8d7da !important;
+                  border-left: 4px solid #DC3545;
+              }
+
+              .suspicious-badge {
+                  background-color: #DC3545;
+                  color: white;
+                  padding: 0.25rem 0.5rem;
+                  border-radius: 4px;
+                  font-size: 0.8rem;
+                  font-weight: 500;
+              }
+
+              .blocked-badge {
+                  background-color: #DC3545;
+                  color: white;
+                  padding: 0.25rem 0.5rem;
+                  border-radius: 4px;
+                  font-size: 0.8rem;
+                  font-weight: 500;
+              }
+
+              /* Loading States */
+              .loading-shimmer {
+                  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+                  background-size: 200% 100%;
+                  animation: shimmer 1.5s infinite;
+              }
+
+              @keyframes shimmer {
+                  0% { background-position: -200% 0; }
+                  100% { background-position: 200% 0; }
+              }
+
+              .processing-status {
+                  display: inline-flex;
+                  align-items: center;
+                  color: #666666;
+              }
+
+              .processing-spinner {
+                  width: 16px;
+                  height: 16px;
+                  border: 2px solid #e0e0e0;
+                  border-top: 2px solid #008A20;
+                  border-radius: 50%;
+                  animation: spin 1s linear infinite;
+                  margin-right: 0.5rem;
+              }
+
+              @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+              }
+
+              /* Responsive Design */
+              @media (max-width: 768px) {
+                  .transaction-table {
+                      font-size: 0.9rem;
+                  }
+                  
+                  .transaction-table th,
+                  .transaction-table td {
+                      padding: 0.5rem;
+                  }
+                  
+                  .balance-amount {
+                      font-size: 1.5rem;
+                  }
+              }
+
+              /* Accessibility */
+              .sr-only {
+                  position: absolute;
+                  width: 1px;
+                  height: 1px;
+                  padding: 0;
+                  margin: -1px;
+                  overflow: hidden;
+                  clip: rect(0, 0, 0, 0);
+                  white-space: nowrap;
+                  border: 0;
+              }
+
+              /* Focus indicators */
+              .btn-primary:focus,
+              .card-button:focus {
+                  outline: 2px solid #008A20;
+                  outline-offset: 2px;
+              }
+
+              /* Notification management */
+              .notification-stack {
+                  position: fixed;
+                  top: 0;
+                  left: 0;
+                  right: 0;
+                  z-index: 1070;
+              }
+
+              .notification-item {
+                  margin-bottom: 0.5rem;
+              }
+
+              /* Container adjustments for banners */
+              .main-content {
+                  margin-top: 0;
+                  transition: margin-top 0.3s ease;
+              }
+
+              .main-content.with-banner {
+                  margin-top: 60px;
+              }
+
+              .main-content.with-fraud-alert {
+                  margin-top: 120px;
+              }
+              EOF
+
+              # Create Flask application
+              cat > app.py << 'EOF'
+              from flask import Flask, render_template, request, jsonify
+              import requests
+              import json
+              import time
+              import threading
+              from datetime import datetime
+              import logging
+              import os
+              from typing import Dict, List
+
+              logging.basicConfig(level=logging.INFO)
+              logger = logging.getLogger(__name__)
+
+              app = Flask(__name__)
+
+              FRAUD_API_URL = os.getenv("FRAUD_API_URL", "http://fraud-api-integrated.fraud-detection.svc.cluster.local:8000")
+              BANK_OF_ANTHOS_URL = os.getenv("BANK_OF_ANTHOS_URL", "http://34.45.238.170")
+
+              # In-memory storage for demo
+              transactions_db = []
+              fraud_results_db = {}
+              system_alerts = []
+
+              class TransactionProcessor:
+                  def __init__(self):
+                      self.processing_queue = []
+
+                  def add_transaction(self, transaction_data):
+                      """Add transaction and start fraud analysis"""
+                      transaction_id = f"txn_{int(time.time())}_{len(transactions_db)}"
+
+                      transaction = {
+                          'id': transaction_id,
+                          'timestamp': datetime.utcnow().isoformat(),
+                          'from_account': transaction_data.get('from_account', ''),
+                          'to_account': transaction_data.get('to_account', ''),
+                          'amount': float(transaction_data.get('amount', 0)),
+                          'description': transaction_data.get('description', 'Transfer'),
+                          'status': 'processing',
+                          'fraud_analysis': None
+                      }
+
+                      transactions_db.append(transaction)
+
+                      # Start async fraud analysis
+                      threading.Thread(
+                          target=self._analyze_fraud_async,
+                          args=(transaction_id, transaction_data),
+                          daemon=True
+                      ).start()
+
+                      return transaction_id
+
+                  def _analyze_fraud_async(self, transaction_id, transaction_data):
+                      """Perform fraud analysis asynchronously"""
+                      try:
+                          # Simulate processing delay
+                          time.sleep(2)
+
+                          # Create Bank of Anthos transaction format
+                          bank_transaction = {
+                              "fromAccountNum": transaction_data.get('from_account', '1234567890'),
+                              "fromRoutingNum": "123456789",
+                              "toAccountNum": transaction_data.get('to_account', '0987654321'),
+                              "toRoutingNum": "123456789",
+                              "amount": int(float(transaction_data.get('amount', 0)) * 100),
+                              "uuid": transaction_id
+                          }
+
+                          # Call fraud detection API
+                          response = requests.post(
+                              f"{FRAUD_API_URL}/analyze-bank-transaction",
+                              json=bank_transaction,
+                              timeout=30
+                          )
+
+                          if response.status_code == 200:
+                              fraud_result = response.json()
+                              fraud_results_db[transaction_id] = fraud_result
+
+                              # Update transaction status
+                              for txn in transactions_db:
+                                  if txn['id'] == transaction_id:
+                                      txn['status'] = 'analyzed'
+                                      txn['fraud_analysis'] = fraud_result
+
+                                      # Add system alert for high-risk transactions
+                                      if fraud_result.get('fraud_score', 0) > 0.6:
+                                          alert = {
+                                              'id': f"alert_{int(time.time())}",
+                                              'type': 'fraud_alert',
+                                              'message': f"High-risk transaction detected: ${transaction_data.get('amount', 0)} - {fraud_result.get('explanation', 'Suspicious activity')}",
+                                              'transaction_id': transaction_id,
+                                              'timestamp': datetime.utcnow().isoformat(),
+                                              'dismissed': False
+                                          }
+                                          system_alerts.append(alert)
+                                      break
+                          else:
+                              logger.error(f"Fraud API error for {transaction_id}: {response.status_code}")
+                              # Update with error status
+                              for txn in transactions_db:
+                                  if txn['id'] == transaction_id:
+                                      txn['status'] = 'analysis_failed'
+                                      break
+
+                      except Exception as e:
+                          logger.error(f"Fraud analysis failed for {transaction_id}: {e}")
+                          for txn in transactions_db:
+                              if txn['id'] == transaction_id:
+                                  txn['status'] = 'analysis_failed'
+                                  break
+
+              transaction_processor = TransactionProcessor()
+
+              @app.route('/')
+              def dashboard():
+                  """Main Bank of Anthos fraud detection dashboard"""
+                  try:
+                      # Get system status
+                      health_response = requests.get(f"{FRAUD_API_URL}/health", timeout=5)
+                      system_status = health_response.json() if health_response.status_code == 200 else {}
+
+                      # Calculate metrics
+                      total_transactions = len(transactions_db)
+                      suspicious_count = len([t for t in transactions_db if t.get('fraud_analysis', {}).get('fraud_score', 0) > 0.6])
+                      processing_count = len([t for t in transactions_db if t['status'] == 'processing'])
+
+                      # Get recent transactions (last 20)
+                      recent_transactions = transactions_db[-20:] if transactions_db else []
+
+                      # Get active alerts
+                      active_alerts = [a for a in system_alerts if not a.get('dismissed', False)][-5:]
+
+                      return render_template('dashboard.html',
+                                           system_status=system_status,
+                                           total_transactions=total_transactions,
+                                           suspicious_count=suspicious_count,
+                                           processing_count=processing_count,
+                                           transactions=recent_transactions,
+                                           alerts=active_alerts,
+                                           bank_url=BANK_OF_ANTHOS_URL)
+
+                  except Exception as e:
+                      logger.error(f"Dashboard error: {e}")
+                      return render_template('dashboard.html',
+                                           system_status={},
+                                           total_transactions=0,
+                                           suspicious_count=0,
+                                           processing_count=0,
+                                           transactions=[],
+                                           alerts=[],
+                                           bank_url=BANK_OF_ANTHOS_URL,
+                                           error=str(e))
+
+              @app.route('/api/simulate-transaction', methods=['POST'])
+              def simulate_transaction():
+                  """Simulate a bank transaction for testing"""
+                  try:
+                      data = request.json
+                      transaction_id = transaction_processor.add_transaction(data)
+
+                      return jsonify({
+                          'success': True,
+                          'transaction_id': transaction_id,
+                          'message': 'Transaction submitted for processing'
+                      })
+
+                  except Exception as e:
+                      logger.error(f"Transaction simulation error: {e}")
+                      return jsonify({'success': False, 'error': str(e)}), 500
+
+              @app.route('/api/transactions')
+              def get_transactions():
+                  """Get recent transactions with fraud analysis"""
+                  try:
+                      return jsonify({
+                          'transactions': transactions_db[-50:],
+                          'total': len(transactions_db)
+                      })
+                  except Exception as e:
+                      return jsonify({'error': str(e)}), 500
+
+              @app.route('/api/alerts')
+              def get_alerts():
+                  """Get system alerts"""
+                  try:
+                      active_alerts = [a for a in system_alerts if not a.get('dismissed', False)]
+                      return jsonify({
+                          'alerts': active_alerts,
+                          'total': len(active_alerts)
+                      })
+                  except Exception as e:
+                      return jsonify({'error': str(e)}), 500
+
+              @app.route('/api/dismiss-alert/<alert_id>', methods=['POST'])
+              def dismiss_alert(alert_id):
+                  """Dismiss a system alert"""
+                  try:
+                      for alert in system_alerts:
+                          if alert['id'] == alert_id:
+                              alert['dismissed'] = True
+                              break
+                      return jsonify({'success': True})
+                  except Exception as e:
+                      return jsonify({'error': str(e)}), 500
+
+              @app.route('/api/system-status')
+              def system_status():
+                  """Get current system status"""
+                  try:
+                      response = requests.get(f"{FRAUD_API_URL}/health", timeout=5)
+                      fraud_api_status = response.json() if response.status_code == 200 else {}
+
+                      return jsonify({
+                          'fraud_api': fraud_api_status,
+                          'dashboard': {
+                              'status': 'healthy',
+                              'transactions_processed': len(transactions_db),
+                              'alerts_active': len([a for a in system_alerts if not a.get('dismissed', False)])
+                          }
+                      })
+                  except Exception as e:
+                      return jsonify({'error': str(e)}), 500
+
+              if __name__ == '__main__':
+                  logger.info("🚀 Starting Bank of Anthos Fraud Detection Dashboard")
+                  app.run(host='0.0.0.0', port=5000, debug=False)
+              EOF
+
+              # Create Bank of Anthos HTML template
+              cat > templates/dashboard.html << 'EOF'
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Bank of Anthos - Fraud Detection</title>
+                  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+                  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+                  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+                  <link rel="stylesheet" href="{{ url_for('static', filename='styles/bank-anthos-fraud.css') }}">
+              </head>
+              <body>
+                  <!-- Notification Stack -->
+                  <div class="notification-stack" id="notificationStack">
+                      {% for alert in alerts %}
+                      <div class="notification-item fraud-alert-banner" id="alert-{{ alert.id }}">
+                          <div>
+                              <span class="material-icons">warning</span>
+                              {{ alert.message }}
+                          </div>
+                          <button class="btn btn-sm" onclick="dismissAlert('{{ alert.id }}')" style="background: none; border: none; color: white;">
+                              <span class="material-icons">close</span>
+                          </button>
+                      </div>
+                      {% endfor %}
+                  </div>
+
+                  <!-- Bank of Anthos Navigation -->
+                  <nav class="navbar navbar-expand-lg navbar-top">
+                      <div class="container">
+                          <a class="navbar-brand d-flex align-items-center" href="{{ bank_url }}">
+                              <span class="material-icons me-2" style="font-size: 2rem;">account_balance</span>
+                              <span class="header-title">Bank of Anthos</span>
+                          </a>
+                          <div class="navbar-nav ms-auto">
+                              <span class="nav-item header-title">Fraud Detection</span>
+                          </div>
+                      </div>
+                  </nav>
+
+                  <!-- Main Content -->
+                  <main class="container main-content {% if alerts %}with-fraud-alert{% endif %}">
+
+                      <!-- Header Section -->
+                      <div class="row col-lg-12 align-items-start top-row mb-4">
+                          <div class="col-md-8">
+                              <small class="text-uppercase text-muted secondary-text">Overview</small>
+                              <h2 class="header-title">AI Fraud Detection</h2>
+                          </div>
+                          <div class="col-md-4 text-end">
+                              <a href="{{ bank_url }}" class="btn btn-primary">
+                                  <span class="material-icons me-1">arrow_back</span>
+                                  Back to Banking
+                              </a>
+                          </div>
+                      </div>
+
+                      <!-- System Status Cards -->
+                      <div class="row mb-4">
+                          <div class="col-lg-3 col-md-6 mb-3">
+                              <div class="balance-card">
+                                  <p class="balance-label">Total Transactions</p>
+                                  <h1 class="balance-amount">{{ total_transactions }}</h1>
+                              </div>
+                          </div>
+                          <div class="col-lg-3 col-md-6 mb-3">
+                              <div class="balance-card">
+                                  <p class="balance-label">Suspicious Detected</p>
+                                  <h1 class="balance-amount" style="color: #DC3545;">{{ suspicious_count }}</h1>
+                              </div>
+                          </div>
+                          <div class="col-lg-3 col-md-6 mb-3">
+                              <div class="balance-card">
+                                  <p class="balance-label">Processing</p>
+                                  <h1 class="balance-amount" style="color: #008A20;">{{ processing_count }}</h1>
+                              </div>
+                          </div>
+                          <div class="col-lg-3 col-md-6 mb-3">
+                              <div class="balance-card">
+                                  <p class="balance-label">AI Status</p>
+                                  <div class="d-flex align-items-center">
+                                      {% if system_status.get('gemini_configured') %}
+                                          <span class="material-icons me-2" style="color: #28A745; font-size: 2rem;">check_circle</span>
+                                          <span style="color: #28A745; font-weight: 500;">Active</span>
+                                      {% else %}
+                                          <span class="material-icons me-2" style="color: #ffc107; font-size: 2rem;">warning</span>
+                                          <span style="color: #ffc107; font-weight: 500;">Fallback</span>
+                                      {% endif %}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+
+                      <!-- Transaction Simulation -->
+                      <div class="row mb-4">
+                          <div class="col-12">
+                              <div class="card">
+                                  <div class="card-body">
+                                      <h5 class="card-header-title mb-3">
+                                          <span class="material-icons me-2">science</span>
+                                          Simulate Bank Transaction
+                                      </h5>
+                                      <form id="transactionForm">
+                                          <div class="row">
+                                              <div class="col-md-3">
+                                                  <div class="mb-3">
+                                                      <label class="form-label">From Account</label>
+                                                      <input type="text" class="form-control" id="fromAccount" value="1234567890" maxlength="10" required>
+                                                  </div>
+                                              </div>
+                                              <div class="col-md-3">
+                                                  <div class="mb-3">
+                                                      <label class="form-label">To Account</label>
+                                                      <input type="text" class="form-control" id="toAccount" value="0987654321" maxlength="10" required>
+                                                  </div>
+                                              </div>
+                                              <div class="col-md-3">
+                                                  <div class="mb-3">
+                                                      <label class="form-label">Amount ($)</label>
+                                                      <input type="number" class="form-control" id="amount" value="100.00" step="0.01" min="0.01" required>
+                                                  </div>
+                                              </div>
+                                              <div class="col-md-3">
+                                                  <div class="mb-3">
+                                                      <label class="form-label">Description</label>
+                                                      <input type="text" class="form-control" id="description" value="Transfer" required>
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          <button type="submit" class="btn btn-primary">
+                                              <span class="material-icons me-1">send</span>
+                                              Send Payment
+                                          </button>
+                                      </form>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+
+                      <!-- Transaction History -->
+                      <div class="row">
+                          <div class="col-12">
+                              <div class="card">
+                                  <div class="card-body">
+                                      <h5 class="card-header-title mb-3">
+                                          <span class="material-icons me-2">history</span>
+                                          Recent Transactions
+                                      </h5>
+
+                                      {% if transactions %}
+                                      <div class="table-responsive">
+                                          <table class="transaction-table">
+                                              <thead>
+                                                  <tr>
+                                                      <th>Date</th>
+                                                      <th>From</th>
+                                                      <th>To</th>
+                                                      <th>Amount</th>
+                                                      <th>Description</th>
+                                                      <th>Status</th>
+                                                      <th>Risk</th>
+                                                  </tr>
+                                              </thead>
+                                              <tbody id="transactionTableBody">
+                                                  {% for transaction in transactions %}
+                                                  <tr class="{% if transaction.fraud_analysis and transaction.fraud_analysis.fraud_score > 0.7 %}transaction-fraudulent{% elif transaction.fraud_analysis and transaction.fraud_analysis.fraud_score > 0.4 %}transaction-suspicious{% endif %}"
+                                                      id="transaction-{{ transaction.id }}">
+                                                      <td>{{ transaction.timestamp[:19].replace('T', ' ') }}</td>
+                                                      <td>{{ transaction.from_account }}</td>
+                                                      <td>{{ transaction.to_account }}</td>
+                                                      <td>
+                                                          <span class="amount-debit">-${{ "%.2f"|format(transaction.amount) }}</span>
+                                                      </td>
+                                                      <td>{{ transaction.description }}</td>
+                                                      <td>
+                                                          {% if transaction.status == 'processing' %}
+                                                              <div class="processing-status">
+                                                                  <div class="processing-spinner"></div>
+                                                                  Processing
+                                                              </div>
+                                                          {% elif transaction.status == 'analyzed' %}
+                                                              <span class="material-icons" style="color: #28A745;">check_circle</span>
+                                                          {% elif transaction.status == 'analysis_failed' %}
+                                                              <span class="material-icons" style="color: #ffc107;">warning</span>
+                                                          {% endif %}
+                                                      </td>
+                                                      <td>
+                                                          {% if transaction.fraud_analysis %}
+                                                              {% if transaction.fraud_analysis.fraud_score > 0.7 %}
+                                                                  <span class="blocked-badge">🚫 Blocked</span>
+                                                              {% elif transaction.fraud_analysis.fraud_score > 0.4 %}
+                                                                  <span class="suspicious-badge">⚠ Suspicious</span>
+                                                              {% else %}
+                                                                  <span class="material-icons" style="color: #28A745;">verified</span>
+                                                              {% endif %}
+                                                          {% elif transaction.status == 'processing' %}
+                                                              <div class="loading-shimmer" style="width: 60px; height: 20px; border-radius: 4px;"></div>
+                                                          {% endif %}
+                                                      </td>
+                                                  </tr>
+                                                  {% endfor %}
+                                              </tbody>
+                                          </table>
+                                      </div>
+                                      {% else %}
+                                      <div class="text-center py-4">
+                                          <span class="material-icons" style="font-size: 3rem; color: #ccc;">receipt_long</span>
+                                          <p class="text-muted mt-2">No transactions yet. Simulate a transaction to see fraud detection in action.</p>
+                                      </div>
+                                      {% endif %}
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  </main>
+
+                  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+                  <script>
+                  // Bank of Anthos Fraud Detection Dashboard JavaScript
+
+                  // Transaction form handling
+                  document.getElementById('transactionForm').addEventListener('submit', async function(e) {
+                      e.preventDefault();
+
+                      const submitBtn = e.target.querySelector('button[type="submit"]');
+                      const originalText = submitBtn.innerHTML;
+
+                      // Show loading state
+                      submitBtn.innerHTML = '<span class="material-icons me-1">hourglass_empty</span>Processing...';
+                      submitBtn.disabled = true;
+
+                      try {
+                          const response = await fetch('/api/simulate-transaction', {
+                              method: 'POST',
+                              headers: {
+                                  'Content-Type': 'application/json',
+                              },
+                              body: JSON.stringify({
+                                  from_account: document.getElementById('fromAccount').value,
+                                  to_account: document.getElementById('toAccount').value,
+                                  amount: document.getElementById('amount').value,
+                                  description: document.getElementById('description').value
+                              })
+                          });
+
+                          const result = await response.json();
+
+                          if (result.success) {
+                              // Show success notification
+                              showSuccessNotification('Transaction submitted successfully! Analyzing for fraud...');
+
+                              // Reset form
+                              document.getElementById('transactionForm').reset();
+                              document.getElementById('fromAccount').value = '1234567890';
+                              document.getElementById('toAccount').value = '0987654321';
+                              document.getElementById('amount').value = '100.00';
+                              document.getElementById('description').value = 'Transfer';
+
+                              // Refresh transactions after a short delay
+                              setTimeout(refreshTransactions, 1000);
+
+                          } else {
+                              showErrorNotification('Transaction failed: ' + result.error);
+                          }
+
+                      } catch (error) {
+                          showErrorNotification('Connection error: ' + error.message);
+                      } finally {
+                          // Restore button
+                          submitBtn.innerHTML = originalText;
+                          submitBtn.disabled = false;
+                      }
+                  });
+
+                  // Notification functions
+                  function showSuccessNotification(message) {
+                      const notification = document.createElement('div');
+                      notification.className = 'notification-item success-banner';
+                      notification.innerHTML = `
+                          <div>
+                              <span class="material-icons">check_circle</span>
+                              ${message}
+                          </div>
+                          <button class="btn btn-sm" onclick="this.parentElement.remove()" style="background: none; border: none; color: white;">
+                              <span class="material-icons">close</span>
+                          </button>
+                      `;
+
+                      document.getElementById('notificationStack').appendChild(notification);
+
+                      // Auto-dismiss after 5 seconds
+                      setTimeout(() => {
+                          if (notification.parentElement) {
+                              notification.remove();
+                          }
+                      }, 5000);
+                  }
+
+                  function showErrorNotification(message) {
+                      const notification = document.createElement('div');
+                      notification.className = 'notification-item fraud-alert-banner';
+                      notification.innerHTML = `
+                          <div>
+                              <span class="material-icons">error</span>
+                              ${message}
+                          </div>
+                          <button class="btn btn-sm" onclick="this.parentElement.remove()" style="background: none; border: none; color: white;">
+                              <span class="material-icons">close</span>
+                          </button>
+                      `;
+
+                      document.getElementById('notificationStack').appendChild(notification);
+                  }
+
+                  // Dismiss alert function
+                  async function dismissAlert(alertId) {
+                      try {
+                          await fetch(`/api/dismiss-alert/${alertId}`, { method: 'POST' });
+                          document.getElementById(`alert-${alertId}`).remove();
+                      } catch (error) {
+                          console.error('Failed to dismiss alert:', error);
+                      }
+                  }
+
+                  // Real-time transaction updates
+                  async function refreshTransactions() {
+                      try {
+                          const response = await fetch('/api/transactions');
+                          const data = await response.json();
+
+                          if (data.transactions) {
+                              updateTransactionTable(data.transactions.slice(-20)); // Show last 20
+                          }
+
+                      } catch (error) {
+                          console.error('Failed to refresh transactions:', error);
+                      }
+                  }
+
+                  function updateTransactionTable(transactions) {
+                      const tbody = document.getElementById('transactionTableBody');
+                      if (!tbody) return;
+
+                      tbody.innerHTML = '';
+
+                      transactions.forEach(transaction => {
+                          const row = document.createElement('tr');
+                          row.id = `transaction-${transaction.id}`;
+
+                          // Apply styling based on fraud analysis
+                          if (transaction.fraud_analysis) {
+                              if (transaction.fraud_analysis.fraud_score > 0.7) {
+                                  row.className = 'transaction-fraudulent';
+                              } else if (transaction.fraud_analysis.fraud_score > 0.4) {
+                                  row.className = 'transaction-suspicious';
+                              }
+                          }
+
+                          // Status column
+                          let statusHtml = '';
+                          if (transaction.status === 'processing') {
+                              statusHtml = `
+                                  <div class="processing-status">
+                                      <div class="processing-spinner"></div>
+                                      Processing
+                                  </div>
+                              `;
+                          } else if (transaction.status === 'analyzed') {
+                              statusHtml = '<span class="material-icons" style="color: #28A745;">check_circle</span>';
+                          } else if (transaction.status === 'analysis_failed') {
+                              statusHtml = '<span class="material-icons" style="color: #ffc107;">warning</span>';
+                          }
+
+                          // Risk column
+                          let riskHtml = '';
+                          if (transaction.fraud_analysis) {
+                              if (transaction.fraud_analysis.fraud_score > 0.7) {
+                                  riskHtml = '<span class="blocked-badge">🚫 Blocked</span>';
+                              } else if (transaction.fraud_analysis.fraud_score > 0.4) {
+                                  riskHtml = '<span class="suspicious-badge">⚠ Suspicious</span>';
+                              } else {
+                                  riskHtml = '<span class="material-icons" style="color: #28A745;">verified</span>';
+                              }
+                          } else if (transaction.status === 'processing') {
+                              riskHtml = '<div class="loading-shimmer" style="width: 60px; height: 20px; border-radius: 4px;"></div>';
+                          }
+
+                          row.innerHTML = `
+                              <td>${transaction.timestamp.substring(0, 19).replace('T', ' ')}</td>
+                              <td>${transaction.from_account}</td>
+                              <td>${transaction.to_account}</td>
+                              <td><span class="amount-debit">-$${parseFloat(transaction.amount).toFixed(2)}</span></td>
+                              <td>${transaction.description}</td>
+                              <td>${statusHtml}</td>
+                              <td>${riskHtml}</td>
+                          `;
+
+                          tbody.appendChild(row);
+                      });
+                  }
+
+                  // Auto-refresh every 3 seconds
+                  setInterval(refreshTransactions, 3000);
+
+                  // Check for new alerts every 5 seconds
+                  setInterval(async function() {
+                      try {
+                          const response = await fetch('/api/alerts');
+                          const data = await response.json();
+
+                          // Handle new alerts (simplified for demo)
+                          if (data.alerts && data.alerts.length > 0) {
+                              // Update page metrics
+                              location.reload(); // Simple refresh for demo
+                          }
+
+                      } catch (error) {
+                          console.error('Failed to check alerts:', error);
+                      }
+                  }, 5000);
+
+                  // Accessibility: Announce important updates to screen readers
+                  function announceToScreenReader(message) {
+                      const announcement = document.createElement('div');
+                      announcement.setAttribute('aria-live', 'polite');
+                      announcement.setAttribute('aria-atomic', 'true');
+                      announcement.className = 'sr-only';
+                      announcement.textContent = message;
+
+                      document.body.appendChild(announcement);
+
+                      setTimeout(() => {
+                          document.body.removeChild(announcement);
+                      }, 1000);
+                  }
+
+                  // Handle reduced motion preference
+                  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                      // Disable animations for users who prefer reduced motion
+                      const style = document.createElement('style');
+                      style.textContent = `
+                          *, *::before, *::after {
+                              animation-duration: 0.01ms !important;
+                              animation-iteration-count: 1 !important;
+                              transition-duration: 0.01ms !important;
+                          }
+                      `;
+                      document.head.appendChild(style);
+                  }
+                  </script>
+              </body>
+              </html>
+              EOF
+
+              python app.py
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bank-anthos-fraud-dashboard
+  namespace: fraud-detection
+spec:
+  type: LoadBalancer
+  selector:
+    app: bank-anthos-fraud-dashboard
+  ports:
+  - name: http
+    port: 5000
+    targetPort: 5000

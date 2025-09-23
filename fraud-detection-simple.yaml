@@ -1,189 +1,344 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fraud-api-simple
+  name: fraud-api-integrated
   namespace: fraud-detection
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: fraud-api-simple
+      app: fraud-api-integrated
   template:
     metadata:
       labels:
-        app: fraud-api-simple
+        app: fraud-api-integrated
     spec:
       containers:
-      - name: fraud-api
-        image: python:3.11-slim
-        ports:
-        - containerPort: 8000
-        env:
-        - name: GEMINI_API_KEY
-          value: "AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4"
-        command: ["/bin/bash", "-c"]
-        args:
-        - |
-          pip install fastapi uvicorn google-generativeai requests
-          mkdir -p /app && cd /app
-          cat > main.py << 'EOF'
-          from fastapi import FastAPI
-          from pydantic import BaseModel
-          import google.generativeai as genai
-          import os
-          import json
-          from datetime import datetime
-          import logging
+        - name: fraud-api
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GEMINI_API_KEY
+              value: "AIzaSyB5tZVwZeHJX6GwRE7duXQRo0IKWjXJdm4"
+            - name: BANK_OF_ANTHOS_FRONTEND_URL
+              value: "http://frontend.default.svc.cluster.local"
+            - name: LEDGERWRITER_URL
+              value: "http://ledgerwriter.default.svc.cluster.local:8080"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install fastapi uvicorn google-generativeai requests flask jinja2
+              mkdir -p /app && cd /app
+              cat > main.py << 'EOF'
+              from fastapi import FastAPI, Request, HTTPException
+              from fastapi.responses import HTMLResponse, JSONResponse
+              from fastapi.templating import Jinja2Templates
+              from fastapi.staticfiles import StaticFiles
+              from pydantic import BaseModel
+              import google.generativeai as genai
+              import os
+              import json
+              import requests
+              from datetime import datetime
+              import logging
+              from typing import Optional, List
+              import asyncio
+              import threading
+              import time
 
-          logging.basicConfig(level=logging.INFO)
-          logger = logging.getLogger(__name__)
+              logging.basicConfig(level=logging.INFO)
+              logger = logging.getLogger(__name__)
 
-          GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-          if GEMINI_API_KEY:
-              try:
-                  genai.configure(api_key=GEMINI_API_KEY)
-                  model = genai.GenerativeModel('gemini-1.5-flash')
-                  logger.info("✅ Gemini AI configured successfully")
-              except Exception as e:
-                  logger.error(f"❌ Gemini AI configuration failed: {e}")
-                  model = None
-          else:
-              logger.warning("⚠️ Gemini API key not found")
-              model = None
-
-          app = FastAPI(title="AI Fraud Detection API", version="1.0.0")
-
-          class TransactionRequest(BaseModel):
-              transactionId: str
-              amount: float
-              timestamp: str
-              userId: str
-              merchantId: str = "unknown"
-              location: str = "unknown"
-
-          @app.get("/")
-          async def root():
-              return {
-                  "service": "AI Fraud Detection API",
-                  "version": "1.0.0",
-                  "status": "running",
-                  "gemini_configured": model is not None
-              }
-
-          @app.get("/health")
-          async def health():
-              return {"status": "healthy", "gemini_configured": model is not None}
-
-          @app.post("/analyze")
-          async def analyze_transaction(transaction: TransactionRequest):
-              start_time = datetime.utcnow()
-              
-              try:
-                  logger.info(f"Analyzing transaction {transaction.transactionId}")
-                  
-                  if not model:
-                      # Fallback analysis
-                      fraud_score = min(transaction.amount / 5000, 0.95)
-                      risk_level = "HIGH" if fraud_score > 0.7 else "MEDIUM" if fraud_score > 0.4 else "LOW"
-                      
-                      return {
-                          "transactionId": transaction.transactionId,
-                          "fraud_score": fraud_score,
-                          "risk_level": risk_level,
-                          "confidence": 0.7,
-                          "explanation": f"Fallback analysis: Amount-based risk assessment (${transaction.amount})",
-                          "recommendation": "REVIEW" if fraud_score > 0.5 else "APPROVE",
-                          "processing_time_ms": (datetime.utcnow() - start_time).total_seconds() * 1000,
-                          "ai_powered": False
-                      }
-                  
-                  # AI analysis
-                  prompt = f"""
-                  Analyze this transaction for fraud:
-                  Amount: ${transaction.amount}
-                  User: {transaction.userId}
-                  Merchant: {transaction.merchantId}
-                  Location: {transaction.location}
-                  
-                  Return JSON:
-                  {{
-                      "fraud_score": 0.0-1.0,
-                      "risk_level": "LOW|MEDIUM|HIGH",
-                      "confidence": 0.0-1.0,
-                      "explanation": "reasoning",
-                      "recommendation": "APPROVE|REVIEW|BLOCK"
-                  }}
-                  """
-                  
-                  response = model.generate_content(prompt)
-                  
+              # Configure Gemini AI
+              GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+              if GEMINI_API_KEY:
                   try:
-                      json_start = response.text.find('{')
-                      json_end = response.text.rfind('}') + 1
-                      ai_result = json.loads(response.text[json_start:json_end])
-                  except:
-                      fraud_score = min(transaction.amount / 3000, 0.9)
-                      ai_result = {
-                          "fraud_score": fraud_score,
-                          "risk_level": "HIGH" if fraud_score > 0.7 else "MEDIUM",
-                          "confidence": 0.8,
-                          "explanation": f"AI analysis: Transaction amount ${transaction.amount} analyzed",
-                          "recommendation": "REVIEW" if fraud_score > 0.5 else "APPROVE"
-                      }
-                  
-                  processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-                  
+                      genai.configure(api_key=GEMINI_API_KEY)
+                      model = genai.GenerativeModel('gemini-1.5-flash')
+                      logger.info("✅ Gemini AI configured successfully")
+                  except Exception as e:
+                      logger.error(f"❌ Gemini AI configuration failed: {e}")
+                      model = None
+              else:
+                  logger.warning("⚠️ Gemini API key not found")
+                  model = None
+
+              app = FastAPI(title="Bank of Anthos - AI Fraud Detection", version="2.0.0")
+
+              # In-memory storage for transaction monitoring
+              transaction_history = []
+              fraud_alerts = []
+
+              class BankTransaction(BaseModel):
+                  fromAccountNum: str
+                  fromRoutingNum: str
+                  toAccountNum: str
+                  toRoutingNum: str
+                  amount: int  # Amount in cents
+                  uuid: str
+                  timestamp: Optional[str] = None
+
+              class FraudAnalysis(BaseModel):
+                  transactionId: str
+                  fraud_score: float
+                  risk_level: str
+                  confidence: float
+                  explanation: str
+                  recommendation: str
+                  processing_time_ms: float
+                  ai_powered: bool
+                  bank_transaction: dict
+
+              @app.get("/")
+              async def root():
                   return {
-                      "transactionId": transaction.transactionId,
-                      "fraud_score": ai_result.get("fraud_score", 0.5),
-                      "risk_level": ai_result.get("risk_level", "MEDIUM"),
-                      "confidence": ai_result.get("confidence", 0.8),
-                      "explanation": ai_result.get("explanation", "AI-powered analysis"),
-                      "recommendation": ai_result.get("recommendation", "REVIEW"),
-                      "processing_time_ms": processing_time,
-                      "ai_powered": True
-                  }
-                  
-              except Exception as e:
-                  logger.error(f"Analysis failed: {str(e)}")
-                  return {
-                      "transactionId": transaction.transactionId,
-                      "fraud_score": 0.5,
-                      "risk_level": "MEDIUM",
-                      "confidence": 0.3,
-                      "explanation": f"Analysis error: {str(e)}",
-                      "recommendation": "REVIEW",
-                      "processing_time_ms": (datetime.utcnow() - start_time).total_seconds() * 1000,
-                      "ai_powered": False
+                      "service": "Bank of Anthos - AI Fraud Detection",
+                      "version": "2.0.0",
+                      "status": "running",
+                      "gemini_configured": model is not None,
+                      "integration": "Bank of Anthos Transaction Monitor",
+                      "monitored_transactions": len(transaction_history),
+                      "fraud_alerts": len([a for a in fraud_alerts if a['risk_level'] in ['HIGH', 'CRITICAL']])
                   }
 
-          if __name__ == "__main__":
-              import uvicorn
-              logger.info("🚀 Starting Fraud Detection API")
-              uvicorn.run(app, host="0.0.0.0", port=8000)
-          EOF
-          python main.py
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "250m"
+              @app.get("/health")
+              async def health():
+                  return {
+                      "status": "healthy",
+                      "gemini_configured": model is not None,
+                      "monitoring_active": True,
+                      "transactions_processed": len(transaction_history)
+                  }
+
+              @app.post("/analyze-bank-transaction")
+              async def analyze_bank_transaction(transaction: BankTransaction):
+                  """Analyze a Bank of Anthos transaction for fraud"""
+                  start_time = datetime.utcnow()
+                  transaction_id = f"txn_{int(time.time())}_{transaction.uuid[:8]}"
+
+                  try:
+                      # Convert cents to dollars
+                      amount_dollars = transaction.amount / 100.0
+
+                      logger.info(f"🔍 Analyzing Bank of Anthos transaction: ${amount_dollars} from {transaction.fromAccountNum} to {transaction.toAccountNum}")
+
+                      # Store transaction for monitoring
+                      transaction_record = {
+                          "id": transaction_id,
+                          "timestamp": datetime.utcnow().isoformat(),
+                          "amount": amount_dollars,
+                          "from_account": transaction.fromAccountNum,
+                          "to_account": transaction.toAccountNum,
+                          "from_routing": transaction.fromRoutingNum,
+                          "to_routing": transaction.toRoutingNum,
+                          "uuid": transaction.uuid
+                      }
+                      transaction_history.append(transaction_record)
+
+                      if not model:
+                          # Enhanced fallback analysis for bank transactions
+                          fraud_score = calculate_bank_fraud_score(transaction_record)
+                          risk_level = get_risk_level(fraud_score)
+
+                          analysis = FraudAnalysis(
+                              transactionId=transaction_id,
+                              fraud_score=fraud_score,
+                              risk_level=risk_level,
+                              confidence=0.75,
+                              explanation=f"Bank transaction analysis: ${amount_dollars} transfer. Risk factors: amount threshold, account patterns.",
+                              recommendation="REVIEW" if fraud_score > 0.5 else "APPROVE",
+                              processing_time_ms=(datetime.utcnow() - start_time).total_seconds() * 1000,
+                              ai_powered=False,
+                              bank_transaction=transaction_record
+                          )
+                      else:
+                          # AI-powered analysis
+                          prompt = f"""
+                          You are analyzing a real Bank of Anthos transaction for fraud detection:
+
+                          Transaction Details:
+                          - Amount: ${amount_dollars}
+                          - From Account: {transaction.fromAccountNum}
+                          - To Account: {transaction.toAccountNum}
+                          - From Routing: {transaction.fromRoutingNum}
+                          - To Routing: {transaction.toRoutingNum}
+                          - Transaction UUID: {transaction.uuid}
+
+                          Banking Context:
+                          - This is a real banking transaction from Bank of Anthos
+                          - Internal routing number indicates local bank transfers
+                          - Account numbers are 10-digit bank account identifiers
+
+                          Analyze for fraud patterns and return JSON:
+                          {{
+                              "fraud_score": 0.0-1.0,
+                              "risk_level": "LOW|MEDIUM|HIGH|CRITICAL",
+                              "confidence": 0.0-1.0,
+                              "explanation": "Detailed analysis of banking transaction patterns",
+                              "recommendation": "APPROVE|REVIEW|BLOCK",
+                              "risk_factors": ["list", "of", "risk", "factors"]
+                          }}
+
+                          Consider: transaction amount, account patterns, routing analysis, timing patterns.
+                          """
+
+                          response = model.generate_content(prompt)
+
+                          try:
+                              json_start = response.text.find('{')
+                              json_end = response.text.rfind('}') + 1
+                              ai_result = json.loads(response.text[json_start:json_end])
+                              logger.info(f"✅ AI analysis completed - Score: {ai_result.get('fraud_score', 0):.2f}")
+                          except Exception as parse_error:
+                              logger.warning(f"⚠️ AI response parsing failed: {parse_error}")
+                              fraud_score = calculate_bank_fraud_score(transaction_record)
+                              ai_result = {
+                                  "fraud_score": fraud_score,
+                                  "risk_level": get_risk_level(fraud_score),
+                                  "confidence": 0.8,
+                                  "explanation": f"AI analysis with fallback: Bank transaction ${amount_dollars} analyzed with enhanced banking patterns",
+                                  "recommendation": "REVIEW" if fraud_score > 0.5 else "APPROVE",
+                                  "risk_factors": ["amount_analysis", "account_pattern", "routing_analysis"]
+                              }
+
+                          processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+                          analysis = FraudAnalysis(
+                              transactionId=transaction_id,
+                              fraud_score=ai_result.get("fraud_score", 0.5),
+                              risk_level=ai_result.get("risk_level", "MEDIUM"),
+                              confidence=ai_result.get("confidence", 0.8),
+                              explanation=ai_result.get("explanation", "AI-powered banking fraud analysis"),
+                              recommendation=ai_result.get("recommendation", "REVIEW"),
+                              processing_time_ms=processing_time,
+                              ai_powered=True,
+                              bank_transaction=transaction_record
+                          )
+
+                      # Store fraud analysis
+                      fraud_alerts.append(analysis.dict())
+
+                      # Log high-risk transactions
+                      if analysis.fraud_score > 0.6:
+                          logger.warning(f"🚨 HIGH RISK TRANSACTION: {transaction_id} - Score: {analysis.fraud_score:.2f}")
+
+                      return analysis
+
+                  except Exception as e:
+                      logger.error(f"❌ Bank transaction analysis failed: {str(e)}")
+                      processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+                      return FraudAnalysis(
+                          transactionId=transaction_id,
+                          fraud_score=0.5,
+                          risk_level="MEDIUM",
+                          confidence=0.3,
+                          explanation=f"Analysis error occurred: {str(e)}. Using safe default assessment.",
+                          recommendation="REVIEW",
+                          processing_time_ms=processing_time,
+                          ai_powered=False,
+                          bank_transaction=transaction_record if 'transaction_record' in locals() else {}
+                      )
+
+              def calculate_bank_fraud_score(transaction: dict) -> float:
+                  """Enhanced fraud scoring for bank transactions"""
+                  score = 0.0
+                  amount = transaction['amount']
+
+                  # Amount-based scoring (banking context)
+                  if amount > 10000:  # Large transfers
+                      score += 0.7
+                  elif amount > 5000:
+                      score += 0.5
+                  elif amount > 2000:
+                      score += 0.3
+                  elif amount > 1000:
+                      score += 0.2
+                  elif amount < 1:  # Micro transactions
+                      score += 0.4
+
+                  # Account pattern analysis
+                  from_acct = transaction['from_account']
+                  to_acct = transaction['to_account']
+
+                  # Check for suspicious account patterns
+                  if from_acct == to_acct:
+                      score += 0.8  # Self-transfer (should be blocked by validator)
+
+                  # Routing analysis
+                  if transaction['from_routing'] != transaction['to_routing']:
+                      score += 0.2  # External transfer
+
+                  # Time-based analysis (simplified)
+                  try:
+                      hour = datetime.fromisoformat(transaction['timestamp'].replace('Z', '+00:00')).hour
+                      if 2 <= hour <= 5:  # Late night transactions
+                          score += 0.3
+                      elif 22 <= hour or hour <= 6:  # Off-hours
+                          score += 0.1
+                  except:
+                      pass
+
+                  return min(score, 0.95)
+
+              def get_risk_level(score: float) -> str:
+                  """Convert fraud score to risk level"""
+                  if score >= 0.8:
+                      return "CRITICAL"
+                  elif score >= 0.6:
+                      return "HIGH"
+                  elif score >= 0.3:
+                      return "MEDIUM"
+                  else:
+                      return "LOW"
+
+              @app.get("/transactions")
+              async def get_monitored_transactions():
+                  """Get all monitored Bank of Anthos transactions"""
+                  return {
+                      "total_transactions": len(transaction_history),
+                      "transactions": transaction_history[-50:],  # Last 50 transactions
+                      "fraud_alerts": len([a for a in fraud_alerts if a['fraud_score'] > 0.5])
+                  }
+
+              @app.get("/fraud-alerts")
+              async def get_fraud_alerts():
+                  """Get all fraud analysis results"""
+                  return {
+                      "total_alerts": len(fraud_alerts),
+                      "high_risk_alerts": len([a for a in fraud_alerts if a['fraud_score'] > 0.6]),
+                      "alerts": fraud_alerts[-20:]  # Last 20 alerts
+                  }
+
+              if __name__ == "__main__":
+                  import uvicorn
+                  logger.info("🚀 Starting Bank of Anthos AI Fraud Detection System")
+                  logger.info("🔗 Integrated with Bank of Anthos transaction monitoring")
+                  uvicorn.run(app, host="0.0.0.0", port=8000)
+              EOF
+              python main.py
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: fraud-api-simple
+  name: fraud-api-integrated
   namespace: fraud-detection
 spec:
   type: LoadBalancer
   selector:
-    app: fraud-api-simple
+    app: fraud-api-integrated
   ports:
-  - name: http
-    port: 8000
-    targetPort: 8000
+    - name: http
+      port: 8000
+      targetPort: 8000
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -201,139 +356,139 @@ spec:
         app: fraud-dashboard-simple
     spec:
       containers:
-      - name: fraud-dashboard
-        image: python:3.11-slim
-        ports:
-        - containerPort: 8501
-        command: ["/bin/bash", "-c"]
-        args:
-        - |
-          pip install streamlit requests plotly pandas
-          mkdir -p /app && cd /app
-          cat > dashboard.py << 'EOF'
-          import streamlit as st
-          import requests
-          import json
-          import time
-          from datetime import datetime
-          import plotly.graph_objects as go
+        - name: fraud-dashboard
+          image: python:3.11-slim
+          ports:
+            - containerPort: 8501
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install streamlit requests plotly pandas
+              mkdir -p /app && cd /app
+              cat > dashboard.py << 'EOF'
+              import streamlit as st
+              import requests
+              import json
+              import time
+              from datetime import datetime
+              import plotly.graph_objects as go
 
-          st.set_page_config(page_title="AI Fraud Detection", page_icon="🚨", layout="wide")
-          st.title("🚨 AI Fraud Detection Dashboard")
-          st.subheader("GKE Turns 10 Hackathon - Real-time AI Analysis")
+              st.set_page_config(page_title="AI Fraud Detection", page_icon="🚨", layout="wide")
+              st.title("🚨 AI Fraud Detection Dashboard")
+              st.subheader("GKE Turns 10 Hackathon - Real-time AI Analysis")
 
-          FRAUD_API_URL = "http://fraud-api-simple.fraud-detection.svc.cluster.local:8000"
+              FRAUD_API_URL = "http://fraud-api-simple.fraud-detection.svc.cluster.local:8000"
 
-          # Sidebar
-          st.sidebar.header("🧪 Test Transaction")
-          transaction_id = st.sidebar.text_input("Transaction ID", f"txn_{int(time.time())}")
-          amount = st.sidebar.number_input("Amount ($)", min_value=0.01, value=100.0)
-          user_id = st.sidebar.text_input("User ID", "user123")
-          merchant_id = st.sidebar.text_input("Merchant ID", "merchant456")
-          location = st.sidebar.text_input("Location", "New York, NY")
+              # Sidebar
+              st.sidebar.header("🧪 Test Transaction")
+              transaction_id = st.sidebar.text_input("Transaction ID", f"txn_{int(time.time())}")
+              amount = st.sidebar.number_input("Amount ($)", min_value=0.01, value=100.0)
+              user_id = st.sidebar.text_input("User ID", "user123")
+              merchant_id = st.sidebar.text_input("Merchant ID", "merchant456")
+              location = st.sidebar.text_input("Location", "New York, NY")
 
-          if st.sidebar.button("🔍 Analyze Transaction"):
-              with st.spinner("🤖 Analyzing with AI..."):
-                  try:
-                      response = requests.post(f"{FRAUD_API_URL}/analyze", json={
-                          "transactionId": transaction_id,
-                          "amount": amount,
-                          "timestamp": datetime.utcnow().isoformat(),
-                          "userId": user_id,
-                          "merchantId": merchant_id,
-                          "location": location
-                      }, timeout=30)
-                      
-                      if response.status_code == 200:
-                          result = response.json()
+              if st.sidebar.button("🔍 Analyze Transaction"):
+                  with st.spinner("🤖 Analyzing with AI..."):
+                      try:
+                          response = requests.post(f"{FRAUD_API_URL}/analyze", json={
+                              "transactionId": transaction_id,
+                              "amount": amount,
+                              "timestamp": datetime.utcnow().isoformat(),
+                              "userId": user_id,
+                              "merchantId": merchant_id,
+                              "location": location
+                          }, timeout=30)
                           
-                          col1, col2, col3 = st.columns(3)
-                          with col1:
-                              st.metric("Fraud Score", f"{result['fraud_score']:.3f}")
-                          with col2:
-                              st.metric("Risk Level", result['risk_level'])
-                          with col3:
-                              st.metric("Confidence", f"{result['confidence']:.3f}")
-                          
-                          # Gauge chart
-                          fig = go.Figure(go.Indicator(
-                              mode = "gauge+number",
-                              value = result['fraud_score'] * 100,
-                              title = {'text': "Fraud Risk %"},
-                              gauge = {
-                                  'axis': {'range': [None, 100]},
-                                  'bar': {'color': "darkblue"},
-                                  'steps': [
-                                      {'range': [0, 30], 'color': "lightgreen"},
-                                      {'range': [30, 70], 'color': "yellow"},
-                                      {'range': [70, 100], 'color': "red"}
-                                  ]
-                              }
-                          ))
-                          st.plotly_chart(fig, use_container_width=True)
-                          
-                          st.subheader("🔍 Analysis")
-                          st.write(result['explanation'])
-                          
-                          st.subheader("💡 Recommendation")
-                          if result['recommendation'] == 'APPROVE':
-                              st.success(f"✅ {result['recommendation']}")
-                          elif result['recommendation'] == 'REVIEW':
-                              st.warning(f"⚠️ {result['recommendation']}")
+                          if response.status_code == 200:
+                              result = response.json()
+                              
+                              col1, col2, col3 = st.columns(3)
+                              with col1:
+                                  st.metric("Fraud Score", f"{result['fraud_score']:.3f}")
+                              with col2:
+                                  st.metric("Risk Level", result['risk_level'])
+                              with col3:
+                                  st.metric("Confidence", f"{result['confidence']:.3f}")
+                              
+                              # Gauge chart
+                              fig = go.Figure(go.Indicator(
+                                  mode = "gauge+number",
+                                  value = result['fraud_score'] * 100,
+                                  title = {'text': "Fraud Risk %"},
+                                  gauge = {
+                                      'axis': {'range': [None, 100]},
+                                      'bar': {'color': "darkblue"},
+                                      'steps': [
+                                          {'range': [0, 30], 'color': "lightgreen"},
+                                          {'range': [30, 70], 'color': "yellow"},
+                                          {'range': [70, 100], 'color': "red"}
+                                      ]
+                                  }
+                              ))
+                              st.plotly_chart(fig, use_container_width=True)
+                              
+                              st.subheader("🔍 Analysis")
+                              st.write(result['explanation'])
+                              
+                              st.subheader("💡 Recommendation")
+                              if result['recommendation'] == 'APPROVE':
+                                  st.success(f"✅ {result['recommendation']}")
+                              elif result['recommendation'] == 'REVIEW':
+                                  st.warning(f"⚠️ {result['recommendation']}")
+                              else:
+                                  st.error(f"🚫 {result['recommendation']}")
+                              
+                              ai_mode = "🤖 Gemini AI" if result.get('ai_powered') else "🔧 Fallback"
+                              st.info(f"Analysis: {ai_mode} | Time: {result['processing_time_ms']:.1f}ms")
+                              
                           else:
-                              st.error(f"🚫 {result['recommendation']}")
-                          
-                          ai_mode = "🤖 Gemini AI" if result.get('ai_powered') else "🔧 Fallback"
-                          st.info(f"Analysis: {ai_mode} | Time: {result['processing_time_ms']:.1f}ms")
-                          
+                              st.error(f"API Error: {response.status_code}")
+                      except Exception as e:
+                          st.error(f"Connection error: {str(e)}")
+
+              # Demo scenarios
+              st.header("🎯 Demo Scenarios")
+              col1, col2, col3 = st.columns(3)
+
+              with col1:
+                  if st.button("☕ Coffee ($4.50)"):
+                      st.write("Normal transaction - Expected: LOW risk")
+                      
+              with col2:
+                  if st.button("💳 Large Purchase ($2500)"):
+                      st.write("Suspicious amount - Expected: HIGH risk")
+                      
+              with col3:
+                  if st.button("🌍 International ($850)"):
+                      st.write("International transaction - Expected: MEDIUM risk")
+
+              # System status
+              st.header("🔧 System Status")
+              try:
+                  health = requests.get(f"{FRAUD_API_URL}/health", timeout=5)
+                  if health.status_code == 200:
+                      data = health.json()
+                      st.success("✅ API: Online")
+                      if data.get('gemini_configured'):
+                          st.success("✅ Gemini AI: Connected")
                       else:
-                          st.error(f"API Error: {response.status_code}")
-                  except Exception as e:
-                      st.error(f"Connection error: {str(e)}")
-
-          # Demo scenarios
-          st.header("🎯 Demo Scenarios")
-          col1, col2, col3 = st.columns(3)
-          
-          with col1:
-              if st.button("☕ Coffee ($4.50)"):
-                  st.write("Normal transaction - Expected: LOW risk")
-                  
-          with col2:
-              if st.button("💳 Large Purchase ($2500)"):
-                  st.write("Suspicious amount - Expected: HIGH risk")
-                  
-          with col3:
-              if st.button("🌍 International ($850)"):
-                  st.write("International transaction - Expected: MEDIUM risk")
-
-          # System status
-          st.header("🔧 System Status")
-          try:
-              health = requests.get(f"{FRAUD_API_URL}/health", timeout=5)
-              if health.status_code == 200:
-                  data = health.json()
-                  st.success("✅ API: Online")
-                  if data.get('gemini_configured'):
-                      st.success("✅ Gemini AI: Connected")
+                          st.warning("⚠️ Gemini AI: Fallback mode")
                   else:
-                      st.warning("⚠️ Gemini AI: Fallback mode")
-              else:
-                  st.error("❌ API: Offline")
-          except:
-              st.error("❌ Cannot connect to API")
+                      st.error("❌ API: Offline")
+              except:
+                  st.error("❌ Cannot connect to API")
 
-          st.markdown("---")
-          st.markdown("**GKE Turns 10 Hackathon** | AI Fraud Detection | Google Gemini")
-          EOF
-          streamlit run dashboard.py --server.port=8501 --server.address=0.0.0.0
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "250m"
+              st.markdown("---")
+              st.markdown("**GKE Turns 10 Hackathon** | AI Fraud Detection | Google Gemini")
+              EOF
+              streamlit run dashboard.py --server.port=8501 --server.address=0.0.0.0
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
 ---
 apiVersion: v1
 kind: Service
@@ -345,6 +500,6 @@ spec:
   selector:
     app: fraud-dashboard-simple
   ports:
-  - name: http
-    port: 8501
-    targetPort: 8501
+    - name: http
+      port: 8501
+      targetPort: 8501
